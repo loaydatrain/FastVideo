@@ -897,7 +897,6 @@ class DmdDenoisingStage(DenoisingStage):
                             and progress_bar is not None):
                         progress_bar.update()
 
-
         latents = latents.permute(0, 2, 1, 3, 4)
         # Update batch with final latents
         batch.latents = latents
