@@ -441,6 +441,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
             loss = (torch.mean((model_pred.float() - target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
+            
+            # THIS IS IMPORTANT: DIVIDE LOSS BY SP SIZE
+            loss = loss / self.sp_world_size
 
             loss.backward()
             avg_loss = loss.detach().clone()
@@ -492,17 +495,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._prepare_dit_inputs(training_batch)
 
             # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.latents = training_batch.latents[:, :, :self.training_args.num_latent_t]
             # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :self.training_args.num_latent_t]
             # shard noise to match latents
-            training_batch.noise = shard_latents_across_sp(
-                training_batch.noise,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noise = training_batch.noise[:, :, :self.training_args.num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
