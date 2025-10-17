@@ -45,7 +45,6 @@ from fastvideo.distributed.device_communicators.cpu_communicator import (
     CpuCommunicator)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
-from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -190,7 +189,6 @@ class GroupCoordinator:
         self.device = get_local_torch_device()
 
         self.use_device_communicator = use_device_communicator
-
         self.device_communicator: DeviceCommunicatorBase = None  # type: ignore
         if use_device_communicator and self.world_size > 1:
             # Platform-aware device communicator selection
@@ -805,21 +803,11 @@ def init_distributed_environment(
             "distributed_init_method must be provided when initializing "
             "distributed environment")
 
-        # For MPS, don't pass device_id as it doesn't support device indices
-        if current_platform.is_mps() or current_platform.is_npu():
-            torch.distributed.init_process_group(
-                backend=backend,
-                init_method=distributed_init_method,
-                world_size=world_size,
-                rank=rank)
-        else:
-            # this backend is used for WORLD
-            torch.distributed.init_process_group(
-                backend=backend,
-                init_method=distributed_init_method,
-                world_size=world_size,
-                rank=rank,
-                device_id=device_id)
+        torch.distributed.init_process_group(
+            backend=backend,
+            init_method=distributed_init_method,
+            world_size=world_size,
+            rank=rank)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -962,6 +950,7 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
+    from fastvideo.platforms import current_platform
     if current_platform.is_npu():
         device = torch.device(f"npu:{envs.LOCAL_RANK}")
     elif current_platform.is_cuda_alike() or current_platform.is_cuda():
@@ -986,7 +975,9 @@ def maybe_init_distributed_environment_and_model_parallel(
     device = get_local_torch_device()
     logger.info(
         "Initializing distributed environment with world_size=%d, device=%s",
-        world_size, device)
+        world_size,
+        device,
+        local_main_process_only=False)
 
     init_distributed_environment(
         world_size=world_size,
@@ -998,7 +989,8 @@ def maybe_init_distributed_environment_and_model_parallel(
                               sequence_model_parallel_size=sp_size)
 
     # set device if we're on a CUDA/NPU platform
-    device_type = "npu" if current_platform.is_npu() else "cuda"
+    from fastvideo.platforms import current_platform
+    device_type = current_platform.device_type
     device = torch.device(f"{device_type}:{local_rank}")
     current_platform.get_torch_device().set_device(device)
 
