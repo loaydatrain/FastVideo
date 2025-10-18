@@ -912,8 +912,6 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
 
-
-
         self.video_latent_shape_sp = training_batch.latents.shape
 
         return training_batch

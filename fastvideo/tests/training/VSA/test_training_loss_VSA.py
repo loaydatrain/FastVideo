@@ -1,4 +1,5 @@
-import os
+import os, random
+os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
 import sys
 import subprocess
 from pathlib import Path

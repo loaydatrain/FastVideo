@@ -9,9 +9,10 @@ from fastvideo.distributed.communication_op import (
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
 from fastvideo.forward_context import ForwardContext, get_forward_context
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
-from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
@@ -101,7 +102,10 @@ class DistributedAttention(nn.Module):
         if freqs_cis is not None:
             cos, sin = freqs_cis
             # apply to q and k
-            qkv[:batch_size*2] = _apply_rotary_emb(qkv[:batch_size*2], cos, sin, is_neox_style=False)
+            qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2],
+                                                     cos,
+                                                     sin,
+                                                     is_neox_style=False)
 
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
@@ -191,12 +195,15 @@ class DistributedAttention_VSA(DistributedAttention):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            qkvg[:batch_size*2] = _apply_rotary_emb(qkvg[:batch_size*2], cos, sin, is_neox_style=False)
+            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2],
+                                                      cos,
+                                                      sin,
+                                                      is_neox_style=False)
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
-    
+
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        
+
         output = self.attn_impl.forward(
             q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 

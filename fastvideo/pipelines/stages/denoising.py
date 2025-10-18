@@ -10,12 +10,11 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch
-from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.pipelines.base import STA_Mode
-from fastvideo.distributed import (get_local_torch_device, get_world_group)
+from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -126,7 +125,6 @@ class DenoisingStage(PipelineStage):
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
-
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -790,7 +788,6 @@ class DmdDenoisingStage(DenoisingStage):
             dtype=torch.long,
             device=get_local_torch_device())
 
-
         # Run denoising loop
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -882,9 +879,10 @@ class DmdDenoisingStage(DenoisingStage):
                             [1], dtype=torch.long, device=pred_video.device)
                         
                         noise = randn_tensor(video_raw_latent_shape,
-                                            device=self.device,
-                                            dtype=pred_video.dtype,
-                                            generator=batch.generator[0])
+                                             device=self.device,
+                                             dtype=pred_video.dtype,
+                                             generator=batch.generator)
+
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])

@@ -236,7 +236,6 @@ class VideoGenerator:
 
         if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
 
-
             if use_temporal_scaling_frames:
                 # Convert back to number of frames, ensuring num_frames-1 is a multiple of temporal_scale_factor
                 new_num_frames = (orig_latent_num_frames -

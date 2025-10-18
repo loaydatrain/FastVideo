@@ -1,6 +1,7 @@
-import os
+import os, random
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
+# os.environ["MASTER_PORT"] = "29512"
+os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
 import sys
 import subprocess
 from pathlib import Path

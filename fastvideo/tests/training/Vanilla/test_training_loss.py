@@ -1,6 +1,9 @@
-import os
+import os, random
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
+# os.environ["MASTER_PORT"] = "29512"
+os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
+# loay: disable the below line
+# os.environ["WANDB_MODE"] = "disabled"
 import sys
 import subprocess
 from pathlib import Path
@@ -124,7 +127,7 @@ def test_distributed_training():
     device_name = torch.cuda.get_device_name()
     if "A40" in device_name:
         reference_wandb_summary_file = a40_reference_wandb_summary_file
-    elif "L40S" in device_name:
+    elif "L40S" in device_name or "H100" in device_name:
         reference_wandb_summary_file = l40s_reference_wandb_summary_file
     else:
         raise ValueError(f"Unknown device: {device_name}")
