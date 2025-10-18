@@ -1,5 +1,6 @@
 from fastvideo import VideoGenerator
 
+
 def main():
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
@@ -13,10 +14,11 @@ def main():
     # Generate the video
     video = generator.generate_video(
         prompt,
-        return_frames=True,  # Also return frames from this call (defaults to False)
+        return_frames=
+        True,  # Also return frames from this call (defaults to False)
         output_path="my_videos/",  # Controls where videos are saved
-        save_video=True
-    )
+        save_video=True)
+
 
 if __name__ == '__main__':
     main()
