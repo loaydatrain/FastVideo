@@ -41,6 +41,7 @@ def sequence_model_parallel_shard(input_: torch.Tensor,
 
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
+
     # Loay: this is where the padding logic needs to be added
     # print("loay", input_.shape, dim, input_.shape[dim])
     assert input_.shape[

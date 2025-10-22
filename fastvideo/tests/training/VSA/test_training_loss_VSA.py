@@ -1,5 +1,6 @@
 import os, random
-os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
+# os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
+os.environ["MASTER_PORT"] = "29500"
 import sys
 import subprocess
 from pathlib import Path
@@ -13,7 +14,8 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss_VSA"
-reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
+# reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
+reference_wandb_summary_file = "fastvideo/tests/training/VSA/test_training_loss_VSA_h100_reference_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -103,7 +105,27 @@ def test_distributed_training():
     
     process = subprocess.run(cmd, check=True)
 
-    summary_file = 'wandb/latest-run/files/wandb-summary.json'
+    # summary_file = 'wandb/latest-run/files/wandb-summary.json'
+
+        # summary_file = 'wandb/latest-run/files/wandb-summary.json'
+
+    wandb_root = Path("wandb")
+    # Get all run directories that start with run- (ignore offline runs if you want)
+    run_dirs = sorted(
+        [d for d in wandb_root.glob("run-*") if d.is_dir()],
+        key=lambda d: d.stat().st_mtime,
+        reverse=True
+    )
+    if not run_dirs:
+        raise FileNotFoundError("No W&B run directories found!")
+
+    # Pick the most recent run
+    latest_run_dir = run_dirs[0]
+    summary_file = latest_run_dir / "files" / "wandb-summary.json"
+    print()
+    print(f"Using summary file: {summary_file}")
+    print(f"Comparing against summary file: {reference_wandb_summary_file}")
+    print()
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))

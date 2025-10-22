@@ -1,7 +1,7 @@
 import os, random
 os.environ["MASTER_ADDR"] = "localhost"
-# os.environ["MASTER_PORT"] = "29512"
-os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
+os.environ["MASTER_PORT"] = "29512"
+# os.environ["MASTER_PORT"] = str(29500 + random.randint(1, 1000))
 # loay: disable the below line
 # os.environ["WANDB_MODE"] = "disabled"
 import sys
@@ -21,6 +21,8 @@ from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
 l40s_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/l40s_reference_wandb_summary.json"
+# h100_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/test_training_loss_h100_reference_wandb_summary.json"
+h100_reference_wandb_summary_file = "/mnt/fast-disks/hao_lab/loay/latest_h100_summ.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -42,11 +44,18 @@ def run_worker():
         "--validation_dataset_file", "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
+        
         "--num_gpus", "2",
         "--sp_size", "2",
         "--tp_size", "2",
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", "2",
+        # "--num_gpus", "1",
+        # "--sp_size", "1",
+        # "--tp_size", "1",
+        # "--hsdp_replicate_dim", "1",
+        # "--hsdp_shard_dim", "1",
+
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "1",
         "--gradient_accumulation_steps", "2",
@@ -122,15 +131,35 @@ def test_distributed_training():
         print(f"Process failed with return code: {process.returncode}")
         raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
-    summary_file = 'wandb/latest-run/files/wandb-summary.json'
-
     device_name = torch.cuda.get_device_name()
     if "A40" in device_name:
         reference_wandb_summary_file = a40_reference_wandb_summary_file
-    elif "L40S" in device_name or "H100" in device_name:
+    elif "L40S" in device_name:
         reference_wandb_summary_file = l40s_reference_wandb_summary_file
+    elif "H100" in device_name:
+        reference_wandb_summary_file = h100_reference_wandb_summary_file
     else:
         raise ValueError(f"Unknown device: {device_name}")
+
+        # summary_file = 'wandb/latest-run/files/wandb-summary.json'
+
+    wandb_root = Path("wandb")
+    # Get all run directories that start with run- (ignore offline runs if you want)
+    run_dirs = sorted(
+        [d for d in wandb_root.glob("run-*") if d.is_dir()],
+        key=lambda d: d.stat().st_mtime,
+        reverse=True
+    )
+    if not run_dirs:
+        raise FileNotFoundError("No W&B run directories found!")
+
+    # Pick the most recent run
+    latest_run_dir = run_dirs[0]
+    summary_file = latest_run_dir / "files" / "wandb-summary.json"
+    print()
+    print(f"Using summary file: {summary_file}")
+    print(f"Comparing against summary file: {reference_wandb_summary_file}")
+    print()
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))

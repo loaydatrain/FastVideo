@@ -429,7 +429,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
         with set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
+<<<<<<< HEAD
             model_pred = current_model(**input_kwargs)
+=======
+            model_pred = self.transformer(**input_kwargs)
+            
+            # print("loay, transformer deets")
+            # print(self.transformer.__class__)
+            # print()
+            
+>>>>>>> 6be1597c (rebasing now)
             if self.training_args.precondition_outputs:
                 assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
@@ -438,18 +447,29 @@ class TrainingPipeline(LoRAPipeline, ABC):
             target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
             # make sure no implicit broadcasting happens
+            print(f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}")
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
             loss = torch.mean((model_pred.float() - target.float())**2)
+            
+            loss_for_logging = loss.detach().clone() #loay
+
             loss /= self.training_args.gradient_accumulation_steps
+            # if self.training_args.sp_size > 1: # loay
+            #     # print(self.training_args.sp_size)
+            #     loss = loss / self.training_args.sp_size
             loss.backward()
 
             avg_loss = loss.detach().clone()
+            # avg_loss = loss_for_logging.clone() 
+
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
+        # print("before averaging", avg_loss)
         world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        # print("after averaging", avg_loss)
         training_batch.total_loss += avg_loss.item()
         return training_batch
 
@@ -492,9 +512,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._prepare_dit_inputs(training_batch)
 
             # Shard latents across sp groups
+
+            # print("loay")
+            # print("latents before", training_batch.latents.shape)
             training_batch.latents = training_batch.latents[:, :, :self.
                                                             training_args.
                                                             num_latent_t]
+            # print("latents after", training_batch.latents.shape)
+
             # shard noisy_model_input to match
             training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :
                                                                                 self

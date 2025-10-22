@@ -649,14 +649,10 @@ class WanTransformer3DModel(CachableDiT):
         freqs_cis = (freqs_cos.to(hidden_states.device).float(),
                      freqs_sin.to(hidden_states.device).float())
         
-        # print("loay")
-        # print("hidden states size", hidden_states.shape)
         hidden_states = self.patch_embedding(hidden_states)
-        # print("hidden states size after embedding", hidden_states.shape)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        # print("hidden states size after flatten", hidden_states.shape)
         hidden_states = sequence_model_parallel_shard(hidden_states, dim=1)
-        # print("hidden states size after shard", hidden_states.shape)
+
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
