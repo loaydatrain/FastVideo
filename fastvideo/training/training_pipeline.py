@@ -429,16 +429,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         with set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
-<<<<<<< HEAD
             model_pred = current_model(**input_kwargs)
-=======
-            model_pred = self.transformer(**input_kwargs)
-            
-            # print("loay, transformer deets")
-            # print(self.transformer.__class__)
-            # print()
-            
->>>>>>> 6be1597c (rebasing now)
             if self.training_args.precondition_outputs:
                 assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
