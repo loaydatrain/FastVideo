@@ -41,8 +41,7 @@ from fastvideo.training.activation_checkpoint import (
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
-    shard_latents_across_sp)
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -438,12 +437,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
             target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
             # make sure no implicit broadcasting happens
-            print(f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}")
+            print(
+                f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
+            )
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
             loss = torch.mean((model_pred.float() - target.float())**2)
-            
-            loss_for_logging = loss.detach().clone() #loay
+
+            # loss_for_logging = loss.detach().clone()  #loay
 
             loss /= self.training_args.gradient_accumulation_steps
             # if self.training_args.sp_size > 1: # loay
@@ -452,8 +453,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             loss.backward()
 
             avg_loss = loss.detach().clone()
-            # avg_loss = loss_for_logging.clone() 
-
+            # avg_loss = loss_for_logging.clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)

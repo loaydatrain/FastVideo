@@ -4,7 +4,6 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-import math
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -232,7 +231,7 @@ class DenoisingStage(PipelineStage):
                        1) * (batch.height // spatial_scale) * (
                            batch.width // spatial_scale) // (patch_size[1] *
                                                              patch_size[2])
-            seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
+            # seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -877,7 +876,7 @@ class DmdDenoisingStage(DenoisingStage):
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
-                        
+
                         noise = randn_tensor(video_raw_latent_shape,
                                              device=self.device,
                                              dtype=pred_video.dtype,
