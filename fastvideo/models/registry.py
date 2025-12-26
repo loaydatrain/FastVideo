@@ -69,6 +69,8 @@ _SCHEDULERS = {
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match",
      "SelfForcingFlowMatchScheduler"),
+    "RCMScheduler":
+    ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
 _FAST_VIDEO_MODELS = {
