@@ -1,0 +1,16 @@
+[
+    {
+        "prompt": "A stylish woman walks down a Tokyo street filled with warm glowing neon and animated city signage. She wears a black leather jacket, a long red dress, and black boots, and carries a black purse. She wears sunglasses and red lipstick. She walks confidently and casually. The street is damp and reflective, creating a mirror effect of the colorful lights. Many pedestrians walk about.",
+        "num_frames": 81,
+        "height": 480,
+        "width": 832,
+        "fps": 24
+    },
+    {
+        "prompt": "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a packed Asian market. Street vendors bustle, colorful lanterns sway, and steam rises from various food stalls. The camera captures both his calm enjoyment and the vibrant, chaotic atmosphere around him.",
+        "num_frames": 81,
+        "height": 480,
+        "width": 832,
+        "fps": 24
+    }
+]
