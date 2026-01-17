@@ -91,6 +91,10 @@ distillation_args=(
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver
   --training_state_checkpointing_steps 1000
+  --log_validation
+  --validation_steps 100
+  --validation_sampling_steps "50"
+  --validation_dataset_file $VALIDATION_DATASET_FILE
 )
 
 # Run training

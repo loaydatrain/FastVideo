@@ -206,11 +206,32 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         logger.info("  Learning rate: %s", fake_score_lr)
     
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        """Initialize validation pipeline (not used for SLA training)."""
-        # SLA training doesn't require validation during training
-        # Can be extended to support validation if needed
-        logger.info("Validation pipeline not initialized (SLA training mode)")
-        self.validation_pipeline = None
+        """Initialize validation pipeline for SLA training.
+        
+        Uses WanPipeline (not WanDMDPipeline) with the student model since
+        SLA training uses standard flow matching, not DMD distillation.
+        """
+        from copy import deepcopy
+        from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+        
+        logger.info("Initializing validation pipeline for SLA training...")
+        args_copy = deepcopy(training_args)
+        args_copy.inference_mode = True
+        
+        # Use the student model for validation with standard WanPipeline
+        validation_pipeline = WanPipeline.from_pretrained(
+            training_args.model_path,
+            args=args_copy,
+            inference_mode=True,
+            loaded_modules={"transformer": self.fake_score_transformer},
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            pin_cpu_memory=training_args.pin_cpu_memory,
+            dit_cpu_offload=True)
+        
+        self.validation_pipeline = validation_pipeline
+        logger.info("Validation pipeline initialized with student model")
     
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student model with log-normal timestep sampling.
