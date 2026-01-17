@@ -42,7 +42,7 @@ training_args=(
   --max_train_steps 100000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
+  --gradient_accumulation_steps 1
   --num_latent_t 21
   --num_height 480
   --num_width 832

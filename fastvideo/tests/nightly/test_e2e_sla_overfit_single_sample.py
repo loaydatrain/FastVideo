@@ -135,9 +135,9 @@ def run_sla_training():
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", NUM_GPUS_PER_NODE,
         # Training settings
-        "--max_train_steps", "500",
-        "--learning_rate", "1e-5",
-        "--fake_score_learning_rate", "1e-5",
+        "--max_train_steps", "901",
+        "--learning_rate", "5e-6",
+        "--fake_score_learning_rate", "5e-6",
         "--mixed_precision", "bf16",
         "--dit_precision", "fp32",
         "--weight_decay", "0.01",
@@ -148,7 +148,7 @@ def run_sla_training():
         "--training_state_checkpointing_steps", "1000",
         # Validation
         "--log_validation",
-        "--validation_steps", "50",
+        "--validation_steps", "100",
         "--validation_sampling_steps", "50",
         "--validation_guidance_scale", "3.0",
         # Distillation settings

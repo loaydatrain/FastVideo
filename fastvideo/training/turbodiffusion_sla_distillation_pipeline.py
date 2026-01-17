@@ -244,6 +244,9 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         # Important: Pass the trained student model for validation
         # The model already has SLA attention layers from training
         student_model = self.fake_score_transformer
+        # student_model = self.real_score_transformer
+        # input("Using teacher for validation. hit enter")
+
         logger.info("Using trained student model for validation")
         logger.info("  Student model type: %s", type(student_model).__name__)
         
