@@ -71,19 +71,36 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         
         Teacher (real_score_transformer): Uses FlashAttention
         Student (fake_score_transformer): Uses SLA attention (from env var)
+        
+        We override parent's load_modules to avoid loading an extra base transformer.
+        Parent's load_modules would load: base transformer + teacher + student = 3 transformers.
+        We only need: teacher + student = 2 transformers.
         """
+        from fastvideo.attention.selector import _cached_get_attn_backend
+        from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+        
         training_args = cast(TrainingArgs, fastvideo_args)
         
-        # First, let parent's parent (TrainingPipeline) load base modules
-        # We skip DistillationPipeline.load_modules since we handle teacher/student ourselves
-        from fastvideo.training.training_pipeline import TrainingPipeline
-        modules = TrainingPipeline.load_modules(self, fastvideo_args, loaded_modules)
+        # Temporarily remove 'transformer' from required modules to skip loading it
+        # We'll load teacher and student separately with proper attention backends
+        original_required = self._required_config_modules.copy()
+        self._required_config_modules = [m for m in self._required_config_modules 
+                                          if m != "transformer"]
+        
+        try:
+            # Load base modules (VAE, scheduler, etc.) but NOT transformer
+            modules = ComposedPipelineBase.load_modules(self, fastvideo_args, loaded_modules)
+        finally:
+            # Restore required modules
+            self._required_config_modules = original_required
         
         # Load teacher (real_score) with FlashAttention
         logger.info("Loading teacher model with FlashAttention backend...")
         original_backend = get_global_forced_attn_backend()
         
         try:
+            # Clear cache and force FlashAttention for teacher
+            _cached_get_attn_backend.cache_clear()
             global_force_attn_backend(AttentionBackendEnum.FLASH_ATTN)
             
             model_path = training_args.real_score_model_path or training_args.model_path
@@ -98,6 +115,8 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             logger.info("Teacher loaded with FlashAttention (frozen)")
             
         finally:
+            # Clear cache and restore backend for student
+            _cached_get_attn_backend.cache_clear()
             global_force_attn_backend(original_backend)
         
         # Load student (fake_score) with current backend (should be SLA from env var)
@@ -109,6 +128,10 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             model_path, "transformer", training_args)
         modules["fake_score_transformer"] = self.fake_score_transformer
         logger.info("Student loaded with SLA attention (trainable)")
+        
+        # Use student as primary transformer for compatibility with parent classes
+        self.transformer = self.fake_score_transformer
+        modules["transformer"] = self.transformer
         
         # No transformer_2 support for SLA (single model)
         self.real_score_transformer_2 = None
@@ -208,8 +231,8 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline for SLA training.
         
-        Uses WanPipeline (not WanDMDPipeline) with the student model since
-        SLA training uses standard flow matching, not DMD distillation.
+        Uses WanPipeline with the trained student model (fake_score_transformer).
+        The student model has been trained to use SLA attention.
         """
         from copy import deepcopy
         from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
@@ -218,12 +241,18 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
         
-        # Use the student model for validation with standard WanPipeline
+        # Important: Pass the trained student model for validation
+        # The model already has SLA attention layers from training
+        student_model = self.fake_score_transformer
+        logger.info("Using trained student model for validation")
+        logger.info("  Student model type: %s", type(student_model).__name__)
+        
+        # Create validation pipeline with the student model
         validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,
             inference_mode=True,
-            loaded_modules={"transformer": self.fake_score_transformer},
+            loaded_modules={"transformer": student_model},
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
@@ -231,7 +260,7 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             dit_cpu_offload=True)
         
         self.validation_pipeline = validation_pipeline
-        logger.info("Validation pipeline initialized with student model")
+        logger.info("Validation pipeline initialized with SLA student model")
     
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student model with log-normal timestep sampling.
@@ -312,6 +341,82 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         })
         
         return loss
+    
+    def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
+        """SLA training step - uses only teacher-student alignment loss.
+        
+        Override parent's train_one_step to skip faker_score_forward, which
+        applies a separate flow matching loss designed for DMD distillation.
+        SLA training only needs the MSE alignment between student and teacher.
+        """
+        import copy
+        from fastvideo.forward_context import set_forward_context
+        from fastvideo.distributed import get_world_group
+        
+        gradient_accumulation_steps = getattr(
+            self.training_args, 'gradient_accumulation_steps', 1)
+        
+        # Collect batches for gradient accumulation
+        batches = []
+        for _ in range(gradient_accumulation_steps):
+            batch = self._get_next_batch(training_batch)
+            batch = self._normalize_dit_input(batch)
+            batch = self._prepare_dit_inputs(batch)
+            batch = self._build_attention_metadata(batch)
+            batches.append(batch)
+        
+        # Zero gradients
+        self.fake_score_optimizer.zero_grad()
+        
+        total_loss = 0.0
+        dmd_latent_vis_dict = {}
+        
+        # Forward and backward for each batch
+        for batch in batches:
+            batch_copy = copy.deepcopy(batch)
+            
+            # Student forward pass
+            with set_forward_context(current_timestep=batch_copy.timesteps,
+                                     attn_metadata=None):
+                student_output = self._generator_forward(batch_copy)
+            
+            # Compute teacher-student alignment loss
+            with set_forward_context(current_timestep=batch_copy.timesteps,
+                                     attn_metadata=None):
+                loss = self._dmd_forward(
+                    generator_pred_video=student_output,
+                    training_batch=batch_copy)
+            
+            # Backward
+            (loss / gradient_accumulation_steps).backward()
+            total_loss += loss.detach().item()
+            dmd_latent_vis_dict = batch_copy.dmd_latent_vis_dict
+        
+        # Clip gradients
+        self._clip_model_grad_norm_(batch_copy, self.fake_score_transformer)
+        
+        # Update student weights
+        self.fake_score_optimizer.step()
+        self.fake_score_lr_scheduler.step()
+        
+        # Reduce loss across workers
+        avg_loss = torch.tensor(total_loss / gradient_accumulation_steps, 
+                                device=self.device)
+        world_group = get_world_group()
+        world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+        
+        # Store results (kept for parent class compatibility)
+        training_batch.generator_loss = avg_loss.item()
+        training_batch.fake_score_loss = 0.0  # Not used in SLA
+        training_batch.total_loss = avg_loss.item()  # Required by parent logging
+        training_batch.grad_norm = 0.0  # Placeholder for logging
+        training_batch.dmd_latent_vis_dict = dmd_latent_vis_dict
+        # Parent's logging expects fake_score_timestep in vis dict
+        training_batch.fake_score_latent_vis_dict = {
+            "fake_score_timestep": torch.tensor(0, device=self.device)  # Placeholder
+        }
+        
+        return training_batch
 
 
 def main(args) -> None:
