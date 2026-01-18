@@ -81,7 +81,8 @@ optimizer_args=(
   --max_grad_norm 1.0
   --dit_precision "fp32"
   --num_euler_timesteps 50
-  --enable_gradient_checkpointing_type "full"
+  # Note: gradient checkpointing disabled for SLA - causes forward context issues
+  # --enable_gradient_checkpointing_type "full"
   --training_cfg_rate 0.0
 )
 
@@ -92,7 +93,7 @@ distillation_args=(
   --not_apply_cfg_solver
   --training_state_checkpointing_steps 1000
   --log_validation
-  --validation_steps 100
+  --validation_steps 1000
   --validation_sampling_steps "50"
   --validation_dataset_file $VALIDATION_DATASET_FILE
 )

@@ -107,7 +107,7 @@ def run_sla_training():
     cmd = [
         "torchrun",
         "--nnodes", NUM_NODES,
-        "--master_port", "29513",
+        "--master_port", "29514",
         "--nproc_per_node", NUM_GPUS_PER_NODE,
         TRAINING_ENTRY_FILE_PATH,
         "--model_path", MODEL_PATH,
@@ -136,8 +136,8 @@ def run_sla_training():
         "--hsdp_shard_dim", NUM_GPUS_PER_NODE,
         # Training settings
         "--max_train_steps", "901",
-        "--learning_rate", "5e-6",
-        "--fake_score_learning_rate", "5e-6",
+        "--learning_rate", "1e-5",
+        "--fake_score_learning_rate", "1e-5",
         "--mixed_precision", "bf16",
         "--dit_precision", "fp32",
         "--weight_decay", "0.01",
@@ -161,6 +161,8 @@ def run_sla_training():
         "--tracker_project_name", "sla_overfit_test",
         "--checkpoints_total_limit", "2",
         "--dataloader_num_workers", "4",
+        "--ema_start_step", "0",
+        # "--resume_from_checkpoint" , "data/outputs_sla_overfit/checkpoint-3000/"
     ]
 
     print(f"Running SLA training: {' '.join(cmd)}")

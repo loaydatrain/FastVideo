@@ -168,6 +168,11 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
         
+        # Ensure student is trainable - this is critical!
+        self.fake_score_transformer.requires_grad_(True)
+        self.fake_score_transformer.train()
+        logger.info("Student model set to trainable mode with gradients enabled")
+        
         # Apply gradient checkpointing if enabled
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
