@@ -28,7 +28,7 @@ LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_pro
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs_sla_overfit"))
 
 # Training settings
-NUM_GPUS_PER_NODE = "4"
+NUM_GPUS_PER_NODE = "1"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/turbodiffusion_sla_distillation_pipeline.py"
 
 
@@ -101,6 +101,7 @@ def run_sla_training():
     # Set environment for SLA attention
     env = os.environ.copy()
     env["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
+    # env["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
     env["WANDB_MODE"] = "online"
     env["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -127,7 +128,7 @@ def run_sla_training():
         "--num_latent_t", "8",
         "--num_height", "480",
         "--num_width", "832",
-        "--num_frames", "81",
+        "--num_frames", "41",
         # Distributed settings
         "--num_gpus", NUM_GPUS_PER_NODE,
         "--sp_size", NUM_GPUS_PER_NODE,
@@ -162,6 +163,7 @@ def run_sla_training():
         "--checkpoints_total_limit", "2",
         "--dataloader_num_workers", "4",
         "--ema_start_step", "0",
+        "--enable_gradient_checkpointing_type", "full",
         # "--resume_from_checkpoint" , "data/outputs_sla_overfit/checkpoint-3000/"
     ]
 

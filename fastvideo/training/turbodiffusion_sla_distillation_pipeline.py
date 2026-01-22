@@ -35,20 +35,27 @@ class LogNormalSampler:
     
     Samples timesteps from a log-normal distribution for training.
     This provides better coverage of the timestep range compared to uniform sampling.
+    
+    TurboDiffusion multiplies sigma by video_noise_multiplier = sqrt(state_t) for video
+    before converting to time. This shifts the timestep distribution higher for video.
     """
     
-    def __init__(self, p_mean: float = 0.0, p_std: float = 1.6):
+    def __init__(self, p_mean: float = 0.0, p_std: float = 1.6, 
+                 video_noise_multiplier: float = 1.0):
         self.p_mean = p_mean
         self.p_std = p_std
+        self.video_noise_multiplier = video_noise_multiplier
     
     def __call__(self, batch_size: int, device: torch.device) -> torch.Tensor:
         """Sample timesteps from log-normal distribution.
         
         Returns:
-            sigma values in [0, 1] range (will be used as t in flow matching)
+            time values in [0, 1] range (t = sigma / (sigma + 1))
         """
         u = torch.randn(batch_size, device=device)
         sigma = (u * self.p_std + self.p_mean).exp()
+        # Apply video noise multiplier (TurboDiffusion uses sqrt(state_t) for video)
+        sigma = sigma * self.video_noise_multiplier
         t = sigma / (sigma + 1)
         return t
 
@@ -222,7 +229,17 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         self.denoising_step_list = None
         
         # Add log-normal timestep sampler for TurboDiffusion-style training
-        self.timestep_sampler = LogNormalSampler(p_mean=0.0, p_std=1.6)
+        # TurboDiffusion uses video_noise_multiplier = sqrt(state_t) for video
+        # state_t is num_latent_t (number of latent frames), typically 21 for Wan
+        import math
+        num_latent_t = training_args.num_latent_t
+        video_noise_multiplier = math.sqrt(num_latent_t)
+        logger.info(f"Using video_noise_multiplier = sqrt({num_latent_t}) = {video_noise_multiplier:.4f}")
+        self.timestep_sampler = LogNormalSampler(
+            p_mean=0.0, 
+            p_std=1.6,
+            video_noise_multiplier=video_noise_multiplier
+        )
         
         # No EMA for SLA training by default 
         self.generator_ema = None
@@ -275,8 +292,8 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         
         SLA training uses log-normal timestep distribution instead of discrete denoising steps.
         """
-        from fastvideo.forward_context import set_forward_context
         
+
         latents = training_batch.latents  # [B, C, T, H, W]
         batch_size = latents.shape[0]
         dtype = latents.dtype
@@ -288,7 +305,7 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         training_batch.dmd_latent_vis_dict["generator_timestep"] = t
         
         # Scale to scheduler timestep range
-        timestep = (t * self.num_train_timestep).long()
+        timestep = (t * self.num_train_timestep)
         training_batch.dmd_latent_vis_dict["dmd_timestep"] = timestep
         
         # Expand for broadcasting: [B] -> [B, 1, 1, 1, 1]
@@ -306,13 +323,14 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             noisy_latent, timestep, training_batch.conditional_dict, training_batch)
         
         # Forward pass through student (fake_score_transformer)
-        with set_forward_context(current_timestep=t, attn_metadata=None):
-            pred_output = self.fake_score_transformer(**training_batch.input_kwargs)
-            if isinstance(pred_output, tuple):
-                pred_output = pred_output[0]
-            pred_output = pred_output.permute(0, 2, 1, 3, 4)  # [B, T, C, H, W] -> [B, C, T, H, W]
+        # Note: set_forward_context is already set by train_one_step
+        pred_output = self.fake_score_transformer(**training_batch.input_kwargs)
+        if isinstance(pred_output, tuple):
+            pred_output = pred_output[0]
+        pred_output = pred_output.permute(0, 2, 1, 3, 4)  # [B, T, C, H, W] -> [B, C, T, H, W]
         
         return pred_output
+
     
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
@@ -339,6 +357,12 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             # Permute to match generator_pred_video format
             teacher_output = teacher_output.permute(0, 2, 1, 3, 4)
         
+        # import random
+        # if teacher_output.device.index == 0 and random.random()>0.7:
+        #     print(f"Student output: {generator_pred_video.mean():.6f}, std: {generator_pred_video.std():.6f}")
+        #     print(f"Teacher output: {teacher_output.mean():.6f}, std: {teacher_output.std():.6f}")
+        #     print(f"Max diff: {(generator_pred_video - teacher_output).abs().max():.6f}")
+
         # Compute MSE alignment loss
         loss = F.mse_loss(generator_pred_video.float(), teacher_output.float())
         
@@ -348,6 +372,21 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
             "teacher_pred_video": teacher_output.detach(),
         })
         
+        # if self.state.global_step % self.state.logging_steps == 0:
+        #     # Log SLA projection norm
+        #     proj_l_norms = []
+        #     for name, module in self.fake_score_transformer.named_modules():
+        #         if hasattr(module, "proj_l") and isinstance(module.proj_l, torch.nn.Linear):
+        #            if module.proj_l.weight.grad is not None:
+        #                proj_l_norms.append(module.proj_l.weight.norm().item())
+            
+        #     if len(proj_l_norms) > 0:
+        #         avg_norm = sum(proj_l_norms) / len(proj_l_norms)
+        #         logger.info(f"Step {self.state.global_step}: Avg SLA proj_l norm: {avg_norm:.6f}")
+        #         # Log to tracker if available
+        #         if hasattr(self, "tracker"):
+        #              self.tracker.log({"sla/proj_l_norm": avg_norm}, step=self.state.global_step)
+
         return loss
     
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -383,22 +422,24 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         for batch in batches:
             batch_copy = copy.deepcopy(batch)
             
-            # Student forward pass
+            # Wrap entire forward + backward in set_forward_context so that
+            # gradient checkpointing recomputation has access to the context
             with set_forward_context(current_timestep=batch_copy.timesteps,
                                      attn_metadata=None):
+                # Student forward pass
                 student_output = self._generator_forward(batch_copy)
-            
-            # Compute teacher-student alignment loss
-            with set_forward_context(current_timestep=batch_copy.timesteps,
-                                     attn_metadata=None):
+                
+                # Compute teacher-student alignment loss
                 loss = self._dmd_forward(
                     generator_pred_video=student_output,
                     training_batch=batch_copy)
+                
+                # Backward (inside context so recomputation works)
+                (loss / gradient_accumulation_steps).backward()
             
-            # Backward
-            (loss / gradient_accumulation_steps).backward()
             total_loss += loss.detach().item()
             dmd_latent_vis_dict = batch_copy.dmd_latent_vis_dict
+
         
         # Clip gradients
         self._clip_model_grad_norm_(batch_copy, self.fake_score_transformer)

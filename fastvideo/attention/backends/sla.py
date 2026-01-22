@@ -199,7 +199,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         prefix: str = "",
         # SLA-specific parameters - increased topk for training from scratch
         # TurboDiffusion uses 0.1 for fine-tuned models, but untrained SLA needs higher coverage
-        topk_ratio: float = 0.5,  # 50% of keys for untrained SLA
+        topk_ratio: float = 1.0,  # 50% of keys for untrained SLA
         feature_map: str = "softmax",
         BLKQ: int = 128,  # TurboDiffusion uses BLKQ=128
         BLKK: int = 64,  # TurboDiffusion uses BLKK=64
