@@ -199,7 +199,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         prefix: str = "",
         # SLA-specific parameters - increased topk for training from scratch
         # TurboDiffusion uses 0.1 for fine-tuned models, but untrained SLA needs higher coverage
-        topk_ratio: float = 1.0,  # 50% of keys for untrained SLA
+        topk_ratio: float = 0.1,  # 50% of keys for untrained SLA
         feature_map: str = "softmax",
         BLKQ: int = 128,  # TurboDiffusion uses BLKQ=128
         BLKK: int = 64,  # TurboDiffusion uses BLKK=64
@@ -246,6 +246,17 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         with torch.no_grad():
             nn.init.zeros_(self.proj_l.weight)
             nn.init.zeros_(self.proj_l.bias)  # type: ignore[arg-type]
+
+            # nn.init.kaiming_normal_(self.proj_l.weight, mode='fan_out', nonlinearity='relu')
+        
+            # # Option B: Xavier/Glorot Init (Best for Tanh/Sigmoid/Linear activations)
+            # # nn.init.xavier_uniform_(self.proj_l.weight)
+
+            # # Biases are usually safe to initialize to zero
+            # if self.proj_l.bias is not None:
+            #     nn.init.zeros_(self.proj_l.bias)
+
+            # input("initializing projl using kaiming. proceed?")
 
     def _calc_linear_attention(
         self,
@@ -327,6 +338,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
 
         # Combine sparse and linear outputs
         output = (o_s + o_l).to(original_dtype)
+        # output = (o_s).to(original_dtype)
 
         # Convert back to FastVideo format (B, L, H, D)
         output = output.transpose(1, 2)

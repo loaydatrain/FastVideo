@@ -24,7 +24,7 @@ export TOKENIZERS_PARALLELISM=false
 # SLA attention backend for student model
 # Teacher will use FlashAttention (forced in code)
 export FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN
-export MASTER_PORT=29600
+export MASTER_PORT=29601
 
 # Model and data paths
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
@@ -75,14 +75,14 @@ dataset_args=(
 # Optimizer arguments
 optimizer_args=(
   --learning_rate 1e-5
+  --fake_score_learning_rate 1e-5
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 1000
   --weight_decay 0.01
   --max_grad_norm 1.0
   --dit_precision "fp32"
   --num_euler_timesteps 50
-  # Note: gradient checkpointing disabled for SLA - causes forward context issues
-  # --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full"
   --training_cfg_rate 0.0
 )
 
@@ -93,7 +93,7 @@ distillation_args=(
   --not_apply_cfg_solver
   --training_state_checkpointing_steps 1000
   --log_validation
-  --validation_steps 1000
+  --validation_steps 500
   --validation_sampling_steps "50"
   --validation_dataset_file $VALIDATION_DATASET_FILE
 )
@@ -108,6 +108,7 @@ echo "Student: SLA attention (trainable)"
 
 torchrun \
   --nnodes 1 \
+  --master_port $MASTER_PORT \
   --nproc_per_node $NUM_GPUS \
     fastvideo/training/turbodiffusion_sla_distillation_pipeline.py \
     "${parallel_args[@]}" \

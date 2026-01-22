@@ -175,7 +175,7 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
         
-        # Ensure student is trainable - this is critical!
+        # Ensure student is trainable - train entire model like TurboDiffusion
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
         logger.info("Student model set to trainable mode with gradients enabled")
@@ -286,6 +286,19 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         
         self.validation_pipeline = validation_pipeline
         logger.info("Validation pipeline initialized with SLA student model")
+        
+        # Diagnostic: Print attention backend types used in the student model
+        attn_backends = []
+        for name, module in student_model.named_modules():
+            if hasattr(module, 'attn_impl'):
+                attn_backends.append((name, type(module.attn_impl).__name__))
+        if attn_backends:
+            logger.info("Attention backends in student model for validation:")
+            for name, backend in attn_backends[:5]:  # Print first 5
+                logger.info("  %s: %s", name, backend)
+            if len(attn_backends) > 5:
+                logger.info("  ... and %d more layers", len(attn_backends) - 5)
+
     
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student model with log-normal timestep sampling.
@@ -399,6 +412,23 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         import copy
         from fastvideo.forward_context import set_forward_context
         from fastvideo.distributed import get_world_group
+
+        # if self.state.global_step % self.state.logging_steps == 0:
+        # Log SLA projection norm
+        # proj_l_norms = []
+        # for name, module in self.fake_score_transformer.named_modules():
+        #     if hasattr(module, "proj_l") and isinstance(module.proj_l, torch.nn.Linear):
+        #         if module.proj_l.weight.grad is not None:
+        #             proj_l_norms.append(module.proj_l.weight.norm().item())
+        
+        # if len(proj_l_norms) > 0:
+        #     avg_norm = sum(proj_l_norms) / len(proj_l_norms)
+        #     logger.info(f"SLA weights : {proj_l_norms}")
+        #     logger.info(f"Avg SLA proj_l norm: {avg_norm:.6f}")
+            # Log to tracker if available
+            # if hasattr(self, "tracker"):
+            #         self.tracker.log({"sla/proj_l_norm": avg_norm}, step=self.state.global_step)
+
         
         gradient_accumulation_steps = getattr(
             self.training_args, 'gradient_accumulation_steps', 1)
