@@ -301,6 +301,8 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         """
         original_dtype = query.dtype
 
+        # print("running sla")
+
         # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
         k = key.transpose(1, 2).contiguous()

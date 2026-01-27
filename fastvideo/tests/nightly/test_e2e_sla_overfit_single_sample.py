@@ -28,7 +28,7 @@ LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_pro
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs_sla_overfit"))
 
 # Training settings
-NUM_GPUS_PER_NODE = "1"
+NUM_GPUS_PER_NODE = "4"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/turbodiffusion_sla_distillation_pipeline.py"
 
 
@@ -137,8 +137,8 @@ def run_sla_training():
         "--hsdp_shard_dim", NUM_GPUS_PER_NODE,
         # Training settings
         "--max_train_steps", "9001",
-        "--learning_rate", "1e-6",
-        "--fake_score_learning_rate", "1e-6",
+        "--learning_rate", "1e-5",
+        "--fake_score_learning_rate", "1e-5",
         "--mixed_precision", "bf16",
         "--dit_precision", "fp32",
         "--weight_decay", "0.01",

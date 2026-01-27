@@ -175,10 +175,22 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
         
-        # Ensure student is trainable - train entire model like TurboDiffusion
         self.fake_score_transformer.requires_grad_(True)
-        self.fake_score_transformer.train()
+        # # Ensure student is trainable - ONLY train proj_l parameters (SLA linear attention)
+        # # First freeze all parameters to preserve pretrained weights
+        # self.fake_score_transformer.requires_grad_(False)
+        
+        # # Then unfreeze only proj_l parameters (SLA linear attention projection)
+        # proj_l_count = 0
+        # for name, param in self.fake_score_transformer.named_parameters():
+        #     if 'proj_l' in name:
+        #         param.requires_grad = True
+        #         proj_l_count += 1
+        
         logger.info("Student model set to trainable mode with gradients enabled")
+        self.fake_score_transformer.train()
+        # logger.info(f"SLA training: Only {proj_l_count} proj_l parameters are trainable")
+        # logger.info("All other student model weights are FROZEN")
         
         # Apply gradient checkpointing if enabled
         if training_args.enable_gradient_checkpointing_type is not None:
@@ -300,25 +312,20 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
                 logger.info("  ... and %d more layers", len(attn_backends) - 5)
 
     
-    def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
+    
+    def _generator_forward(self, training_batch: TrainingBatch, t: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
         """Forward pass through student model with log-normal timestep sampling.
         
-        SLA training uses log-normal timestep distribution instead of discrete denoising steps.
+        Args:
+            training_batch: The input batch
+            t: Normalized timestep [0, 1]
+            timestep: Scaled timestep [0, 1000]
         """
         
-
         latents = training_batch.latents  # [B, C, T, H, W]
         batch_size = latents.shape[0]
-        dtype = latents.dtype
-        device = latents.device
         
-        # Sample timesteps from log-normal distribution (TurboDiffusion style)
-        t = self.timestep_sampler(batch_size, device)
-        t = t.clamp(0.0, 1.0)
         training_batch.dmd_latent_vis_dict["generator_timestep"] = t
-        
-        # Scale to scheduler timestep range
-        timestep = (t * self.num_train_timestep)
         training_batch.dmd_latent_vis_dict["dmd_timestep"] = timestep
         
         # Expand for broadcasting: [B] -> [B, 1, 1, 1, 1]
@@ -452,12 +459,26 @@ class TurboDiffusionSLADistillationPipeline(DistillationPipeline):
         for batch in batches:
             batch_copy = copy.deepcopy(batch)
             
+            # Sample timesteps once per batch
+            # Note: In distributed training, we need to ensure all ranks use the same timestep
+            # if we wanted fully synchronized updates. However, _prepare_dit_inputs typically
+            # produces per-rank randomness.
+            # Using LogNormalSampler locally:
+            t = self.timestep_sampler(batch_copy.latents.shape[0], self.device)
+            t = t.clamp(0.0, 1.0)
+            
+            # Scale to scheduler timestep range [0, 1000]
+            timestep = (t * self.num_train_timestep)
+            
+            # Update batch information for context
+            batch_copy.timesteps = timestep
+            
             # Wrap entire forward + backward in set_forward_context so that
             # gradient checkpointing recomputation has access to the context
-            with set_forward_context(current_timestep=batch_copy.timesteps,
+            with set_forward_context(current_timestep=timestep,
                                      attn_metadata=None):
                 # Student forward pass
-                student_output = self._generator_forward(batch_copy)
+                student_output = self._generator_forward(batch_copy, t, timestep)
                 
                 # Compute teacher-student alignment loss
                 loss = self._dmd_forward(
