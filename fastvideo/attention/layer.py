@@ -1,7 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import time
+
 import torch
 import torch.nn as nn
+
+# Optional attention timing controlled by environment variable
+_TIME_ATTENTION = os.getenv("FASTVIDEO_TIME_ATTENTION", "").lower() in ("1", "true", "yes")
+_ATTN_CALL_COUNT = 0
+_ATTN_TOTAL_TIME = 0.0
+
+
+def reset_attention_timing():
+    """Reset attention timing counters."""
+    global _ATTN_CALL_COUNT, _ATTN_TOTAL_TIME
+    _ATTN_CALL_COUNT = 0
+    _ATTN_TOTAL_TIME = 0.0
+
+
+def get_attention_timing_summary() -> dict:
+    """Return attention timing summary as a dict."""
+    return {
+        "call_count": _ATTN_CALL_COUNT,
+        "total_time_ms": _ATTN_TOTAL_TIME,
+        "avg_time_ms": _ATTN_TOTAL_TIME / max(1, _ATTN_CALL_COUNT),
+    }
 
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
@@ -140,7 +164,22 @@ class DistributedAttention(nn.Module):
 
         q, k, v = qkv.chunk(3, dim=0)
 
-        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        # Optional timing instrumentation using CUDA events for accurate kernel timing
+        if _TIME_ATTENTION:
+            global _ATTN_CALL_COUNT, _ATTN_TOTAL_TIME
+            _start_event = torch.cuda.Event(enable_timing=True)
+            _end_event = torch.cuda.Event(enable_timing=True)
+            _start_event.record()
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+            _end_event.record()
+            _end_event.synchronize()
+            _elapsed = _start_event.elapsed_time(_end_event)
+            _ATTN_CALL_COUNT += 1
+            _ATTN_TOTAL_TIME += _elapsed
+            print(f"[ATTN] call={_ATTN_CALL_COUNT} backend={self.backend.name} "
+                  f"shape={list(q.shape)} time={_elapsed:.3f}ms total={_ATTN_TOTAL_TIME:.1f}ms")
+        else:
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
@@ -237,8 +276,25 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.attn_impl.forward(
-            q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+        
+        # Optional timing instrumentation using CUDA events for accurate kernel timing
+        if _TIME_ATTENTION:
+            global _ATTN_CALL_COUNT, _ATTN_TOTAL_TIME
+            _start_event = torch.cuda.Event(enable_timing=True)
+            _end_event = torch.cuda.Event(enable_timing=True)
+            _start_event.record()
+            output = self.attn_impl.forward(
+                q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+            _end_event.record()
+            _end_event.synchronize()
+            _elapsed = _start_event.elapsed_time(_end_event)
+            _ATTN_CALL_COUNT += 1
+            _ATTN_TOTAL_TIME += _elapsed
+            print(f"[ATTN] call={_ATTN_CALL_COUNT} backend={self.backend.name} "
+                  f"shape={list(q.shape)} time={_elapsed:.3f}ms total={_ATTN_TOTAL_TIME:.1f}ms")
+        else:
+            output = self.attn_impl.forward(
+                q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
@@ -325,5 +381,20 @@ class LocalAttention(nn.Module):
             q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
             k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
 
-        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        # Optional timing instrumentation using CUDA events for accurate kernel timing
+        if _TIME_ATTENTION:
+            global _ATTN_CALL_COUNT, _ATTN_TOTAL_TIME
+            _start_event = torch.cuda.Event(enable_timing=True)
+            _end_event = torch.cuda.Event(enable_timing=True)
+            _start_event.record()
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+            _end_event.record()
+            _end_event.synchronize()
+            _elapsed = _start_event.elapsed_time(_end_event)
+            _ATTN_CALL_COUNT += 1
+            _ATTN_TOTAL_TIME += _elapsed
+            print(f"[ATTN] call={_ATTN_CALL_COUNT} backend={self.backend.name} "
+                  f"shape={list(q.shape)} time={_elapsed:.3f}ms total={_ATTN_TOTAL_TIME:.1f}ms")
+        else:
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output

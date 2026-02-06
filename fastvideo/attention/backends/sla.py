@@ -148,7 +148,7 @@ class SLAAttentionBackend(AttentionBackend):
 class SLAAttentionMetadata(AttentionMetadata):
     """Metadata for SLA attention."""
     current_timestep: int
-    topk_ratio: float = 0.5  # Ratio of key blocks to attend to
+    topk_ratio: float = 0.05  # Ratio of key blocks to attend to (95% sparse)
 
 
 class SLAAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -163,7 +163,7 @@ class SLAAttentionMetadataBuilder(AttentionMetadataBuilder):
     def build(
         self,
         current_timestep: int,
-        topk_ratio: float = 0.5,
+        topk_ratio: float = 0.05,
         **kwargs: dict[str, Any],
     ) -> SLAAttentionMetadata:
         return SLAAttentionMetadata(
@@ -198,7 +198,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         num_kv_heads: int | None = None,
         prefix: str = "",
         # SLA-specific parameters - matched to TurboDiffusion defaults
-        topk_ratio: float = 0.1,  # TurboDiffusion uses topk=0.1
+        topk_ratio: float = 0.05,  # TurboDiffusion uses topk=0.1
         feature_map: str = "softmax",
         BLKQ: int = 128,  # TurboDiffusion uses BLKQ=128
         BLKK: int = 64,  # TurboDiffusion uses BLKK=64
@@ -212,6 +212,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         self.softmax_scale = softmax_scale if softmax_scale else head_size**-0.5
         self.causal = causal
         self.prefix = prefix
+        print("SLA sparsity", topk_ratio)
 
         # SLA-specific config
         self.topk_ratio = topk_ratio
@@ -220,7 +221,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         self.dtype = torch.bfloat16 if use_bf16 else torch.float16
 
         # Learnable linear projection for combining sparse + linear attention
-        self.proj_l = nn.Linear(head_size, head_size, dtype=torch.float32)
+        self.proj_l = nn.Linear(head_size, head_size, dtype=torch.bfloat16)
 
         # Feature map for linear attention
         # Type annotation for callables

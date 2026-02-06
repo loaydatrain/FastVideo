@@ -17,6 +17,7 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
+        VSA_sparsity = 0.95,
         # image_encoder_cpu_offload=False,
     )
 

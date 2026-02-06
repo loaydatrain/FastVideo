@@ -1,11 +1,9 @@
 
 import torch
 import math
-import argparse
 from fastvideo.attention.backends.video_sparse_attn import VideoSparseAttentionBackend, VideoSparseAttentionMetadataBuilder, VSA_TILE_SIZE
 from fastvideo.attention.backends.sla import SLAAttentionBackend, SLAAttentionMetadataBuilder, get_block_map
 from fastvideo_kernel import video_sparse_attn
-# Import SLA kernel directly from triton_kernels
 from fastvideo_kernel.triton_kernels.sla_triton import _attention as sla_kernel
 
 # Patch get_sp_group for VSA
@@ -35,27 +33,21 @@ def measure_time(func, *args, **kwargs):
 
     return start_event.elapsed_time(end_event) / 50.0
 
+
 def profile_vsa(batch_size, T, H, W, device, dtype, sparsity=0.95):
+    """Profile VSA kernel only."""
     seq_len = T * H * W
     print(f"\nProfiling VSA (Sparsity {sparsity*100}%) | T={T}, H={H}, W={W} (L={seq_len})...")
     
-    # Setup VSA impl
+    num_heads = 12
+    head_dim = 128
+    
     impl = VideoSparseAttentionBackend.get_impl_cls()(
-        num_heads=16, head_size=128, causal=False, softmax_scale=128**-0.5
+        num_heads=num_heads, head_size=head_dim, causal=False, softmax_scale=head_dim**-0.5
     )
-    if isinstance(impl, torch.nn.Module):
-        impl = impl.to(device).to(dtype)
     
-    # Metadata construction for video geometry
-    # raw_latent_shape needs to match T, H, W after patching?
-    # standard patch size is (1, 2, 2)
+    # Build metadata
     patch_size = (1, 2, 2)
-    # The builder takes 'raw_latent_shape'. 
-    # If we want the *sequence* dimensions to be T, H, W, we must construct raw_latent_shape such that:
-    # raw_T // patch_t = T
-    # raw_H // patch_h = H
-    # raw_W // patch_w = W
-    
     raw_T = T * patch_size[0]
     raw_H = H * patch_size[1]
     raw_W = W * patch_size[2]
@@ -69,72 +61,60 @@ def profile_vsa(batch_size, T, H, W, device, dtype, sparsity=0.95):
         device=device
     )
     
-    num_heads = 16
-    head_dim = 128
-    
     # Inputs
     q = torch.randn(batch_size, seq_len, num_heads, head_dim, device=device, dtype=dtype)
     k = torch.randn(batch_size, seq_len, num_heads, head_dim, device=device, dtype=dtype)
     v = torch.randn(batch_size, seq_len, num_heads, head_dim, device=device, dtype=dtype)
     gate = torch.randn(batch_size, seq_len, num_heads, head_dim, device=device, dtype=dtype)
     
-    # 1. Preprocess (Tiling)
-    # VSA requires preprocessing if we want to measure kernel speed accurately or end-to-end properly
-    t_preprocess = measure_time(impl.preprocess_qkv, q, metadata)
-    print(f"Preprocess (Tile): {t_preprocess:.3f} ms")
-    
-    # Tiled inputs
+    # Preprocess (tile) the inputs
     q_tiled = impl.preprocess_qkv(q, metadata)
     k_tiled = impl.preprocess_qkv(k, metadata)
     v_tiled = impl.preprocess_qkv(v, metadata)
     gate_tiled = impl.preprocess_qkv(gate, metadata)
     
-    # 2. Transpose overhead inside forward
-    def transpose_op(x):
-        return x.transpose(1, 2).contiguous()
-    
-    t_transpose = measure_time(transpose_op, q_tiled)
-    print(f"Transpose Overhead (per tensor): {t_transpose:.3f} ms")
-    
-    # 3. Kernel Execution
+    # Prepare for kernel call (transpose like impl.forward does)
     q_tr = q_tiled.transpose(1, 2).contiguous()
     k_tr = k_tiled.transpose(1, 2).contiguous()
     v_tr = v_tiled.transpose(1, 2).contiguous()
     gate_tr = gate_tiled.transpose(1, 2).contiguous()
     
     cur_topk = math.ceil(
-            (1 - sparsity) *
-            (metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
+        (1 - sparsity) *
+        (metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
     
-    def run_kernel():
+    # Measure kernel only
+    def run_vsa_kernel():
         return video_sparse_attn(
             q_tr, k_tr, v_tr,
             metadata.variable_block_sizes,
             metadata.variable_block_sizes,
             cur_topk,
             block_size=VSA_TILE_SIZE,
-            compress_attn_weight=gate_tr).transpose(1, 2)
-
-    t_kernel = measure_time(run_kernel)
-    print(f"Kernel Only: {t_kernel:.3f} ms")
+            compress_attn_weight=gate_tr
+        )
     
-    # Total
-    t_total = measure_time(impl.forward, q_tiled, k_tiled, v_tiled, gate_tiled, metadata)
-    print(f"Full Forward (impl.forward): {t_total:.3f} ms")
+    t_kernel = measure_time(run_vsa_kernel)
+    print(f"  VSA Kernel Only: {t_kernel:.3f} ms")
     
-    print(f"-> Kernel is {t_kernel/t_total:.1%} of total time")
+    # Measure full forward
+    t_forward = measure_time(impl.forward, q_tiled, k_tiled, v_tiled, gate_tiled, metadata)
+    print(f"  VSA Forward: {t_forward:.3f} ms")
+    return t_kernel, t_forward
 
 
 def profile_sla(batch_size, T, H, W, device, dtype, sparsity=0.95):
+    """Profile SLA kernel only."""
     seq_len = T * H * W
     print(f"\nProfiling SLA (Sparsity {sparsity*100}%) | T={T}, H={H}, W={W} (L={seq_len})...")
     
-    num_heads = 16
+    num_heads = 12
     head_dim = 128
+    BLKQ, BLKK = 128, 64
     
     impl = SLAAttentionBackend.get_impl_cls()(
         num_heads=num_heads, head_size=head_dim, causal=False, use_bf16=(dtype==torch.bfloat16),
-        topk_ratio=(1-sparsity), BLKQ=128, BLKK=64
+        topk_ratio=(1-sparsity), BLKQ=BLKQ, BLKK=BLKK
     ).to(device).to(dtype)
     
     # Inputs
@@ -144,55 +124,54 @@ def profile_sla(batch_size, T, H, W, device, dtype, sparsity=0.95):
     
     metadata = SLAAttentionMetadataBuilder().build(current_timestep=0, topk_ratio=(1-sparsity))
     
-    # 1. Transpose overhead
-    def transpose_op(x):
-        return x.transpose(1, 2).contiguous()
-    t_transpose = measure_time(transpose_op, q)
-    print(f"Transpose Overhead (per tensor): {t_transpose:.3f} ms")
+    # Prepare for kernel call (transpose like impl.forward does)
+    q_tr = q.transpose(1, 2).contiguous()
+    k_tr = k.transpose(1, 2).contiguous()
+    v_tr = v.transpose(1, 2).contiguous()
     
-    q_tr = transpose_op(q)
-    k_tr = transpose_op(k)
-    v_tr = transpose_op(v)
+    # Get block map
+    sparse_map, lut, real_topk = get_block_map(q_tr, k_tr, topk_ratio=(1-sparsity), BLKQ=BLKQ, BLKK=BLKK)
     
-    # 2. Block Map Calculation
-    def run_block_map():
-        return get_block_map(q_tr, k_tr, topk_ratio=(1-sparsity), BLKQ=128, BLKK=64)
-    
-    t_blockmap = measure_time(run_block_map)
-    print(f"Block Map Calc: {t_blockmap:.3f} ms")
-    
-    sparse_map, lut, real_topk = get_block_map(q_tr, k_tr, topk_ratio=(1-sparsity), BLKQ=128, BLKK=64)
-    
-    # 3. Sparse Attention Kernel (Tritech)
-    def run_sparse_kernel():
-        # _attention.apply is triton kernel wrapper
+    # Measure sparse kernel only
+    def run_sla_kernel():
         return sla_kernel.apply(
-            q_tr.to(dtype), k_tr.to(dtype), v_tr.to(dtype), 
-            sparse_map, lut, real_topk, 128, 64
+            q_tr.to(dtype), k_tr.to(dtype), v_tr.to(dtype),
+            sparse_map, lut, real_topk, BLKQ, BLKK
         )
-        
-    t_kernel = measure_time(run_sparse_kernel)
-    print(f"Sparse Kernel Only: {t_kernel:.3f} ms")
     
-    # 4. Linear Attention
-    def run_linear():
-        q_l = impl.feature_map_q(q_tr)
-        k_l = impl.feature_map_k(k_tr)
-        return impl._calc_linear_attention(q_l, k_l, v_tr)
-        
-    t_linear = measure_time(run_linear)
-    print(f"Linear Attn: {t_linear:.3f} ms")
+    t_kernel = measure_time(run_sla_kernel)
+    print(f"  SLA Kernel Only: {t_kernel:.3f} ms")
     
-    # Total
-    t_total = measure_time(impl.forward, q, k, v, metadata)
-    print(f"Full Forward (impl.forward): {t_total:.3f} ms")
+    # Measure block map calculation
+    def run_block_map():
+        return get_block_map(q_tr, k_tr, topk_ratio=(1-sparsity), BLKQ=BLKQ, BLKK=BLKK)
+    t_blockmap = measure_time(run_block_map)
+    print(f"  SLA Block Map: {t_blockmap:.3f} ms")
+    
+    # Measure linear attention branch (feature maps + linear attn + projection)
+    q_linear = impl.feature_map_q(q_tr).contiguous().to(dtype)
+    k_linear = impl.feature_map_k(k_tr).contiguous().to(dtype)
+    def run_linear_attn():
+        
+        o_l = impl._calc_linear_attention(q_linear, k_linear, v_tr)
+        with torch.amp.autocast('cuda', dtype=dtype):
+            o_l = impl.proj_l(o_l)
+        # return o_l
+    t_linear = measure_time(run_linear_attn)
+    print(f"  SLA Linear Attn: {t_linear:.3f} ms")
+    
+    # Measure full forward
+    t_forward = measure_time(impl.forward, q, k, v, metadata)
+    print(f"  SLA Forward: {t_forward:.3f} ms")
+    return t_kernel, t_forward
 
 
 def profile_flash(batch_size, T, H, W, device, dtype):
+    """Profile FlashAttention kernel only."""
     seq_len = T * H * W
     print(f"\nProfiling FlashAttention | T={T}, H={H}, W={W} (L={seq_len})...")
     
-    num_heads = 16
+    num_heads = 12
     head_dim = 128
 
     from fastvideo.attention.backends.flash_attn import FlashAttentionBackend, FlashAttnMetadata
@@ -206,9 +185,9 @@ def profile_flash(batch_size, T, H, W, device, dtype):
     
     metadata = FlashAttnMetadata(current_timestep=0)
     
-    t_kernel = measure_time(impl.forward, q, k, v, metadata)
-    print(f"Flash Kernel (Total): {t_kernel:.3f} ms")
-    return t_kernel
+    t_forward = measure_time(impl.forward, q, k, v, metadata)
+    print(f"  Flash Forward: {t_forward:.3f} ms")
+    return t_forward
 
 
 if __name__ == "__main__":
@@ -216,12 +195,10 @@ if __name__ == "__main__":
     dtype = torch.bfloat16
     
     # Video Workloads (Latent Dimensions)
-    # Assuming patch size overlap is handled by user intent (these are sequence dims)
     video_workloads = [
         # (T, H, W)
-        (16, 32, 32),    # 16k tokens (Small Video)
-        (32, 64, 64),    # 131k tokens (Medium Video)
-        (64, 64, 64),    # 262k tokens (Large Video T)
+        (16, 32, 32),    # 16k tokens
+        (21, 30, 52),    # 32,760 tokens (exact inference geometry)
     ]
     
     for T, H, W in video_workloads:
@@ -240,9 +217,7 @@ if __name__ == "__main__":
         except Exception as e:
            print(f"SLA failed: {e}")
 
-        # Benchmark VSA for all video sizes
         try:
             profile_vsa(1, T, H, W, device, dtype, sparsity=0.95)
         except Exception as e:
             print(f"VSA failed: {e}")
-
