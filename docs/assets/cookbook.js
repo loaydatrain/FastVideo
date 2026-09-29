@@ -136,7 +136,7 @@
     if (platform === "mps") {
       return {
         id: "mps",
-        label: "Apple Silicon · MPS",
+        label: "Apple Silicon · PyTorch MPS",
         hint: recipe.hardware?.minimum_memory || recipe.hardware?.system_memory || "Memory not recorded",
       };
     }
@@ -519,10 +519,10 @@
           option.setAttribute("aria-pressed", String(selected));
         });
         servingAvailability.textContent = profile
-          ? "The playground and API clients share one server process. Both workflows can run on your own machine."
+          ? "The playground and the OpenAI Python client share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
             ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA, MLX, or one Spark.";
+            : "This recipe uses Python directly. FastH3 V1 and FastH3 V2 can also run a local server for the playground and the OpenAI Python client.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
@@ -537,7 +537,7 @@
             ? "Start once, then change prompts in the playground or your app. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache."
             : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
         servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
-          ? "../../getting_started/installation/mps/#run-fasth3-preview"
+          ? "../../getting_started/installation/mlx/"
           : isSpark
             ? "../../getting_started/installation/spark/"
             : "../../getting_started/installation/gpu/";
@@ -574,7 +574,7 @@
       });
 
       description.textContent = useServer
-        ? `FastH3 Preview generates video with audio. This server profile uses the checked-in ${runtime.label} configuration.`
+        ? `${recipe.group_label || recipe.label} generates video with audio. Start the local server, then use the playground or the OpenAI Python client. This profile uses the checked-in ${runtime.label} configuration.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;

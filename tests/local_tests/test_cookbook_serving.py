@@ -84,6 +84,54 @@ def test_mlx_serving_profile_has_native_launcher_and_no_invented_memory():
         assert client["code"] == (ROOT / client["source"]).read_text()
 
 
+def test_fasth3_8step_cuda_and_mlx_share_the_openai_client():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    cuda = next(item for item in recipes if item["id"] == "fasth3-8step-v2-cuda")
+    mlx = next(item for item in recipes if item["id"] == "fasth3-8step-v2-mlx")
+    assert cuda["group"] == mlx["group"] == "fasth3-8step-v2"
+    cuda_profile = cookbook_serving_profile(cuda)
+    mlx_profile = cookbook_serving_profile(mlx)
+    assert cuda_profile["model"] == mlx_profile["model"] == "fasth3"
+    assert cuda_profile["sampling"]["num_inference_steps"] == 9
+    assert mlx_profile["sampling"]["num_inference_steps"] == 9
+    assert "openai_fasth3_8step.yaml" in cuda_profile["command"]
+    assert mlx_profile["command"] == (
+        "python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3_8step.yaml"
+    )
+    assert mlx_profile["prepare"] in mlx["command"]
+    assert "--include-vsa" in mlx_profile["prepare"]
+    preview = cookbook_serving_profile(next(item for item in recipes if item["id"] == "fasth3-preview-cuda"))
+    assert cuda_profile["clients"]["python"]["code"] == preview["clients"]["python"]["code"]
+
+
+def test_mlx_preview_and_8step_yaml_map_sigma_points_to_forwards():
+    from fastvideo.entrypoints.openai.mlx_server import (EIGHT_STEP_MODEL, PREVIEW_MODEL, load_config, mlx_num_steps,
+                                                         validate_mlx_video_request)
+    from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
+    from fastvideo.registry import get_preset_selection
+
+    assert mlx_num_steps(5, model_path=PREVIEW_MODEL) == 4
+    assert mlx_num_steps(None, model_path=PREVIEW_MODEL) == 4
+    assert mlx_num_steps(9, model_path=EIGHT_STEP_MODEL) == 8
+    with pytest.raises(ValueError, match="5 sigma points"):
+        mlx_num_steps(9, model_path=PREVIEW_MODEL)
+    with pytest.raises(ValueError, match="9 sigma points"):
+        mlx_num_steps(5, model_path=EIGHT_STEP_MODEL)
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5), model_path=PREVIEW_MODEL)
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=9),
+                               model_path=EIGHT_STEP_MODEL)
+    with pytest.raises(ValueError, match="9 sigma points"):
+        validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5),
+                                   model_path=EIGHT_STEP_MODEL)
+    preview = load_config(str(ROOT / "examples/serving/mlx_fasth3.yaml"))
+    eight = load_config(str(ROOT / "examples/serving/mlx_fasth3_8step.yaml"))
+    assert preview.generator.vsa is False
+    assert eight.generator.vsa is True
+    assert eight.generator.vsa_sparsity == 0.8
+    assert eight.default_request["sampling"]["num_inference_steps"] == 9
+    assert get_preset_selection(EIGHT_STEP_MODEL) == ("minimax_h3_t2va", "minimax_h3")
+
+
 @pytest.mark.parametrize("field,value", [("model", "wrong-checkpoint"), ("hardware", {"platform": "mlx"})])
 def test_cookbook_rejects_mismatched_serving_recipe(field, value):
     recipe = copy.deepcopy(serving_recipe())
