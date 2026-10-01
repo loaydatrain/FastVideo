@@ -254,6 +254,10 @@
         "href": "/cookbook/flux"
       },
       {
+        "label": "Qwen-Image-2.1",
+        "href": "/inference/qwen_image21"
+      },
+      {
         "label": "Stable Diffusion",
         "href": "/cookbook/stable-diffusion"
       },
