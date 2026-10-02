@@ -8,6 +8,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch.distributed.tensor import DTensor
+from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -267,13 +268,15 @@ class QwenImage21DenoisingStage(PipelineStage):
         try:
             if move:
                 pinned_offload.load(self.transformer, device, pin=fastvideo_args.pin_cpu_memory)
-            for index, timestep in enumerate(batch.timesteps):
+            for index, timestep in enumerate(tqdm(batch.timesteps, desc="Denoising", total=len(batch.timesteps))):
                 latent_input = batch.latents
                 if batch.image_latent is not None:
                     latent_input = torch.cat((batch.image_latent, latent_input), dim=1)
                 mode = "extract" if cache_enabled and index == 0 else ("cached" if cache_enabled else None)
 
-                def predict(embeds, mask, image_mask, cache, latent_input, timestep, mode):
+                def predict(embeds: torch.Tensor, mask: torch.Tensor | None, image_mask: torch.Tensor,
+                            cache: QwenImage21KVCache | None, latent_input: torch.Tensor, timestep: torch.Tensor,
+                            mode: str | None) -> torch.Tensor:
                     result = self.transformer(
                         hidden_states=latent_input,
                         timestep=timestep.expand(1).to(batch.latents.dtype) / 1000,
@@ -294,8 +297,8 @@ class QwenImage21DenoisingStage(PipelineStage):
                         noise = positive
                         if batch.do_classifier_free_guidance:
                             negative = predict(batch.negative_prompt_embeds[0], batch.negative_attention_mask[0],
-                                               state.negative_image_pad_mask, caches[1] if caches else None, latent_input,
-                                               timestep, mode)
+                                               state.negative_image_pad_mask, caches[1] if caches else None,
+                                               latent_input, timestep, mode)
                             noise = negative + batch.true_cfg_scale * (positive - negative)
                         break
                     except QwenImage21KVCacheAllocationError:
