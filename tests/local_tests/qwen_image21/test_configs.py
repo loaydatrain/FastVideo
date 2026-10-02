@@ -44,11 +44,12 @@ def cli(monkeypatch):
                  RunConfig=schema.RunConfig, ServeConfig=schema.ServeConfig)
 
 
-@pytest.mark.parametrize("file,preset,refs", [("qwen_image21_t2i.yaml", "qwen_image21", None),
-                                           ("qwen_image21_edit.yaml", "qwen_image21_edit", ["source.png", "mask.png"])])
-def test_qwen_image21_cli_examples_parse(cli, file, preset, refs):
+@pytest.mark.parametrize("file,workload,refs", [("qwen_image21_t2i.yaml", "t2i", None),
+                                             ("qwen_image21_edit.yaml", "i2i", ["source.png", "mask.png"])])
+def test_qwen_image21_cli_examples_parse(cli, file, workload, refs):
     config = cli.build_generate_run_config(SimpleNamespace(config=str(ROOT / "examples/inference/basic" / file)))
-    assert config.generator.pipeline.preset == preset
+    assert config.generator.pipeline.preset is None
+    assert config.generator.pipeline.workload_type == workload
     assert config.generator.engine.offload.lazy_module_load
     assert config.request.inputs.references == refs
     assert config.request.sampling.reference_resolution == 1024
