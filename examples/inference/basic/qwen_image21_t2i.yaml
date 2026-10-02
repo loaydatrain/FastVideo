@@ -15,6 +15,8 @@ generator:
       lazy_module_load: true
   pipeline:
     workload_type: t2i
+    experimental:
+      kv_cache_device: cuda
 request:
   prompt: A red ceramic teapot, isolated on a transparent background.
   sampling:
