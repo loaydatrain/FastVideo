@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from PIL import Image
 from torch.testing import assert_close
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -179,3 +180,67 @@ def test_qwen_image21_vae_production_loader_parity():
         assert_close(actual_mean, expected.mean.cpu(), atol=1e-5, rtol=1e-4)
         assert_close(actual_logvar, expected.logvar.cpu(), atol=1e-5, rtol=1e-4)
         assert_close(actual_pixels, official.decode(expected.mode()).sample.cpu(), atol=1e-5, rtol=1e-4)
+
+
+@pytest.mark.parametrize("height,width,tiled", [(64, 80, False), (288, 320, True)])
+def test_qwen_image21_vae_bf16_reference_layout_parity(height, width, tiled):
+    """Independent preprocessing must preserve singleton strides for BF16 kernels."""
+    if os.environ.get(RUN_ENV) != "1":
+        pytest.skip(f"set {RUN_ENV}=1 on an allocated CUDA node")
+    if not torch.cuda.is_available():
+        pytest.fail("Qwen-Image-2.1 BF16 VAE production parity requires CUDA", pytrace=False)
+    official_cls = _reference_class(required=True)
+    component_path = MODEL_ROOT / "vae"
+    if not (component_path / "config.json").is_file() or not list(component_path.glob("*.safetensors")):
+        pytest.fail(f"local VAE checkpoint missing at {component_path}", pytrace=False)
+
+    from diffusers.image_processor import VaeImageProcessor
+    from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import QwenImage21Pipeline
+    from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
+    from fastvideo.models.loader.component_loader import VAELoader
+    from fastvideo.pipelines.basic.qwen_image21.inputs import normalize_latents, pack_latents, reference_pixels
+
+    rgb = torch.randint(0, 256, (height, width, 3), generator=torch.Generator().manual_seed(23), dtype=torch.uint8)
+    image = Image.fromarray(rgb.numpy()).convert("RGBA")
+    processor = VaeImageProcessor(vae_scale_factor=16, do_convert_rgb=False)
+    native_pixels = reference_pixels(image)
+    official_pixels = processor.preprocess(image, height=height, width=width).unsqueeze(2)
+    assert_close(native_pixels, official_pixels, atol=0, rtol=0)
+    # Size-one strides can select a different BF16 convolution kernel even
+    # though both tensors contain identical values and are channels_last_3d.
+    assert native_pixels.stride() == official_pixels.stride()
+    device = torch.device("cuda:0")
+    native_pixels = native_pixels.to(device=device, dtype=torch.bfloat16)
+    official_pixels = official_pixels.to(device=device, dtype=torch.bfloat16)
+    assert native_pixels.stride() == official_pixels.stride()
+
+    args = SimpleNamespace(pipeline_config=QwenImage21PipelineConfig(), model_paths={}, vae_cpu_offload=False)
+    args.pipeline_config.vae_config.use_tiling = tiled
+    native = VAELoader().load(str(component_path), args)
+    assert all(parameter.dtype == torch.bfloat16 for parameter in native.parameters())
+    with torch.no_grad():
+        posterior = native.encode(native_pixels).latent_dist
+        actual_mean, actual_logvar = posterior.mean.cpu(), posterior.logvar.cpu()
+        normalized = normalize_latents(posterior.mode(), native.config.latents_mean, native.config.latents_std)
+        actual_packed = pack_latents(normalized).cpu()
+    del native, posterior, normalized
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    official, info = official_cls.from_pretrained(
+        component_path, local_files_only=True, torch_dtype=torch.bfloat16, output_loading_info=True)
+    assert not {key: info.get(key) for key in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
+                if info.get(key)}
+    official = official.to(device).eval()
+    if tiled:
+        official.enable_tiling()
+    with torch.no_grad():
+        expected = official.encode(official_pixels).latent_dist
+        assert_close(actual_mean, expected.mean.cpu(), atol=1e-5, rtol=1e-4)
+        assert_close(actual_logvar, expected.logvar.cpu(), atol=1e-5, rtol=1e-4)
+        mean = torch.tensor(official.config.latents_mean).view(1, official.config.z_dim, 1, 1, 1)
+        std = torch.tensor(official.config.latents_std).view(1, official.config.z_dim, 1, 1, 1)
+        normalized = (expected.mode() - mean.to(device, torch.bfloat16)) / std.to(device, torch.bfloat16)
+        expected_packed = QwenImage21Pipeline._pack_latents(
+            normalized, 1, official.config.z_dim, height // 16, width // 16).cpu()
+        assert_close(actual_packed, expected_packed, atol=1e-5, rtol=1e-4)
