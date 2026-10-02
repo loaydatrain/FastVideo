@@ -5,12 +5,15 @@ Set QWEN_IMAGE21_DIFFUSERS_DIR to Diffusers revision below for random-weight
 CPU parity. Real-weight BF16 parity additionally needs an allocated CUDA GPU,
 QWEN_IMAGE21_MODEL_ROOT, and QWEN_IMAGE21_RUN_DIT_PARITY=1. Explicitly requested
 real-weight tests fail rather than skip when their prerequisites are missing.
+Set QWEN_IMAGE21_DIT_PARITY_REPORT to save block and prediction diagnostics as JSON.
 """
 
 from __future__ import annotations
 
 import gc
 import importlib
+import json
+import math
 import os
 import subprocess
 import sys
@@ -27,6 +30,38 @@ REFERENCE_ROOT = Path(os.environ.get("QWEN_IMAGE21_DIFFUSERS_DIR", ROOT / "offic
 MODEL_ROOT = Path(os.environ.get("QWEN_IMAGE21_MODEL_ROOT", ROOT / "official_weights/Qwen-Image-2.1"))
 RUN_ENV = "QWEN_IMAGE21_RUN_DIT_PARITY"
 PARITY_SCOPE = "both"
+
+
+def _numerical_metrics(actual, expected):
+    actual, expected = actual.detach().float().cpu(), expected.detach().float().cpu()
+    difference = actual - expected
+    reference_rms = expected.square().mean().sqrt()
+    reference_abs_mean = expected.abs().mean()
+    rmse = difference.square().mean().sqrt()
+    mean_abs = difference.abs().mean()
+    floor = torch.finfo(torch.float32).tiny
+    return {
+        "shape": list(actual.shape),
+        "finite": bool(torch.isfinite(actual).all() and torch.isfinite(expected).all()),
+        "max_abs": difference.abs().max().item(),
+        "mean_abs": mean_abs.item(),
+        "rmse": rmse.item(),
+        "reference_rms": reference_rms.item(),
+        "reference_abs_mean": reference_abs_mean.item(),
+        "relative_l2": (rmse / reference_rms.clamp_min(floor)).item(),
+        "relative_abs_mean": (mean_abs / reference_abs_mean.clamp_min(floor)).item(),
+        "total_elements": actual.numel(),
+    }
+
+
+def _modality_summaries(actual, expected, masks):
+    actual, expected = actual.detach().cpu(), expected.detach().cpu()
+    summaries = {"global": _numerical_metrics(actual, expected)}
+    for name, mask in masks.items():
+        assert mask.numel() == actual.shape[1], f"{name} token mask does not match the joint sequence"
+        if bool(mask.any()):
+            summaries[name] = _numerical_metrics(actual[:, mask], expected[:, mask])
+    return summaries
 
 
 def _reference_module(required=False):
@@ -182,6 +217,48 @@ def test_qwen_image21_dit_production_loader_parity():
             handle.remove()
         expected_cached = official(**cached_inputs, kv_cache=official_cache, kv_cache_mode="cached",
                                    return_dict=False)[0]
+
+    # Image slots expand into four unpatched latent tokens; the input masks
+    # independently identify text, reference images, target image and padding.
+    slots = inputs["img_mask"][0].bool().cpu()
+    repeats = torch.where(slots, 4, 1)
+    image_tokens = slots.repeat_interleave(repeats)
+    target_tokens = math.prod(inputs["img_shapes"][0][-1])
+    prefix = torch.arange(image_tokens.numel()) < image_tokens.numel() - target_tokens
+    prompt_valid = inputs["encoder_hidden_states_mask"][0].bool().cpu()
+    slot_valid = torch.cat((prompt_valid, torch.ones(slots.numel() - prompt_valid.numel(), dtype=torch.bool)))
+    text_valid = slot_valid.repeat_interleave(repeats)
+    masks = {
+        "text_prefix": ~image_tokens & text_valid & prefix,
+        "image_tokens": image_tokens,
+        "reference_images": image_tokens & prefix,
+        "target_image": image_tokens & ~prefix,
+        "padding": ~image_tokens & ~text_valid & prefix,
+    }
+    report = {
+        "component": "qwen_image21_transformer",
+        "checkpoint_revision": MODEL_ROOT.name,
+        "reference_revision": REFERENCE_REVISION,
+        "torch_version": torch.__version__,
+        "atol": 3e-3,
+        "rtol": 1e-2,
+        "blocks": [],
+    }
+    for index, (actual_layer, expected_layer) in enumerate(zip(actual_layers, expected_layers, strict=True)):
+        summary = {"block": index, **_modality_summaries(actual_layer, expected_layer, masks)}
+        report["blocks"].append(summary)
+        print(f"QWEN_IMAGE21_DIT_PARITY block_{index} {json.dumps(summary, sort_keys=True)}", flush=True)
+    report["final_prediction"] = _modality_summaries(actual, expected, masks)
+    report["cached_prediction"] = _modality_summaries(
+        actual_cached, expected_cached, {"target_image": torch.ones(target_tokens, dtype=torch.bool)})
+    for name in ("final_prediction", "cached_prediction"):
+        print(f"QWEN_IMAGE21_DIT_PARITY {name} {json.dumps(report[name], sort_keys=True)}", flush=True)
+    report_path = os.environ.get("QWEN_IMAGE21_DIT_PARITY_REPORT")
+    if report_path:
+        destination = Path(report_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
     for index, (actual_layer, expected_layer) in enumerate(zip(actual_layers, expected_layers, strict=True)):
         assert_close(actual_layer, expected_layer, atol=3e-3, rtol=1e-2, msg=f"Transformer block {index}")
     assert_close(actual, expected.float().cpu(), atol=3e-3, rtol=1e-2)
