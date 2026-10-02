@@ -15,7 +15,6 @@ generator:
       lazy_module_load: true
   pipeline:
     workload_type: t2i
-    preset: qwen_image21
 request:
   prompt: A red ceramic teapot, isolated on a transparent background.
   sampling:

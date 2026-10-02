@@ -15,7 +15,6 @@ generator:
       lazy_module_load: true
   pipeline:
     workload_type: i2i
-    preset: qwen_image21_edit
 request:
   prompt: In image 1, turn the object highlighted by the mask in image 2 blue.
   inputs:

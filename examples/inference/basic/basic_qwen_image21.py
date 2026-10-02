@@ -46,8 +46,7 @@ def main() -> None:
                 offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True, vae=True,
                                       lazy_module_load=True),
             ),
-            pipeline=PipelineSelection(workload_type=workload,
-                                       preset="qwen_image21_edit" if args.reference else "qwen_image21"),
+            pipeline=PipelineSelection(workload_type=workload),
         ))
     try:
         generator.generate(
