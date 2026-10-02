@@ -68,7 +68,7 @@ def reference_dimensions(width: int, height: int, resolution: int) -> tuple[int,
 
 
 def resize_reference(image: Image.Image, resolution: int) -> Image.Image:
-    return image.resize(reference_dimensions(*image.size, resolution), resample=Image.Resampling.LANCZOS)
+    return image.resize(reference_dimensions(image.width, image.height, resolution), resample=Image.Resampling.LANCZOS)
 
 
 def vision_reference(image: Image.Image) -> Image.Image:
@@ -79,8 +79,10 @@ def vision_reference(image: Image.Image) -> Image.Image:
 
 def reference_pixels(image: Image.Image) -> torch.Tensor:
     # [B, RGBA, one frame, H, W], with all four channels normalized to [-1, 1].
-    pixels = torch.from_numpy(np.array(image, dtype=np.float32)).permute(2, 0, 1)
-    return (pixels / 127.5 - 1).unsqueeze(0).unsqueeze(2)
+    # Build the batch axis before permuting, as upstream's numpy_to_pt does.
+    # Even a singleton batch stride affects BF16 convolution kernel rounding.
+    pixels = torch.from_numpy(np.array(image, dtype=np.float32)[None]).permute(0, 3, 1, 2)
+    return (pixels / 127.5 - 1).unsqueeze(2)
 
 
 def prompt_template(prompt: str, num_references: int) -> str:
