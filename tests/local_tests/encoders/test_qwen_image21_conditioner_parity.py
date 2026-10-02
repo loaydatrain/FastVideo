@@ -4,6 +4,7 @@
 Run with QWEN_IMAGE21_RUN_ENCODER_PARITY=1 and QWEN_IMAGE21_MODEL_ROOT set to
 the complete local HF snapshot. This gate requires a BF16 CUDA GPU; opting in
 turns missing assets or dependencies into failures rather than skipped parity.
+Set QWEN_IMAGE21_ENCODER_PARITY_REPORT to save the numerical diagnostics as JSON.
 """
 
 import gc
@@ -19,6 +20,29 @@ from PIL import Image
 from torch.testing import assert_close
 
 PARITY_SCOPE = "production_loader"
+ATOL = 1e-2
+RTOL = 1e-2
+
+
+def _numerical_metrics(actual, expected):
+    actual, expected = actual.float(), expected.float()
+    difference = actual - expected
+    reference_rms = expected.square().mean().sqrt()
+    rmse = difference.square().mean().sqrt()
+    actual_flat, expected_flat = actual.flatten().double(), expected.flatten().double()
+    cosine = torch.nn.functional.cosine_similarity(actual_flat, expected_flat, dim=0).clamp(-1, 1)
+    return {
+        "shape": list(actual.shape),
+        "finite": bool(torch.isfinite(actual).all() and torch.isfinite(expected).all()),
+        "max_abs": difference.abs().max().item(),
+        "mean_abs": difference.abs().mean().item(),
+        "rmse": rmse.item(),
+        "reference_rms": reference_rms.item(),
+        "relative_l2": (rmse / reference_rms.clamp_min(torch.finfo(torch.float32).tiny)).item(),
+        "cosine": cosine.item(),
+        "mismatched_elements": int((difference.abs() > ATOL + RTOL * expected.abs()).sum()),
+        "total_elements": actual.numel(),
+    }
 
 
 def _make_cases(processor):
@@ -59,7 +83,7 @@ def test_qwen_image21_conditioner_real_weight_parity():
     if not (root / "text_encoder" / "config.json").is_file() or not (root / "processor").is_dir():
         pytest.fail("The checkpoint must include text_encoder and processor component directories", pytrace=False)
 
-    from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
+    from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor, __version__ as transformers_version
 
     from fastvideo.configs.models.encoders.qwen_image21 import QwenImage21Qwen3VLConfig
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
@@ -112,6 +136,16 @@ def test_qwen_image21_conditioner_real_weight_parity():
         pin_cpu_memory=False,
         disable_offload_on_unified_memory=lambda _device_id, offload_flag=None: False,
     )
+    report = {
+        "component": "qwen_image21_conditioner",
+        "checkpoint_revision": root.name,
+        "torch_version": torch.__version__,
+        "transformers_version": transformers_version,
+        "atol": ATOL,
+        "rtol": RTOL,
+        "cases": {},
+    }
+    failures = []
     try:
         native = TextEncoderLoader().load_model(str(root / "text_encoder"), config, device, args, dtype="bf16")
         for name, case in cases.items():
@@ -120,6 +154,20 @@ def test_qwen_image21_conditioner_real_weight_parity():
             with torch.no_grad():
                 actual = native(**inputs).detach().cpu()
             mask = case["attention_mask"].bool()
-            assert_close(actual[mask], expected[name][mask], rtol=1e-2, atol=1e-2, msg=name)
+            metrics = _numerical_metrics(actual[mask], expected[name][mask])
+            report["cases"][name] = metrics
+            print(f"QWEN_IMAGE21_ENCODER_PARITY {name} {json.dumps(metrics, sort_keys=True)}", flush=True)
+            try:
+                assert_close(actual[mask], expected[name][mask], rtol=RTOL, atol=ATOL,
+                             msg=lambda message: f"{name}: {message}")
+            except AssertionError as error:
+                failures.append(f"{name}: {error}")
+            del actual, inputs
     finally:
+        report_path = os.environ.get("QWEN_IMAGE21_ENCODER_PARITY_REPORT")
+        if report_path:
+            destination = Path(report_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         cleanup_dist_env_and_memory()
+    assert not failures, "\n\n".join(failures)

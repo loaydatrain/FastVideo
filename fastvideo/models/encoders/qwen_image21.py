@@ -45,22 +45,10 @@ class QwenImage21Qwen3VLConditioner(MiniMaxH3Qwen3VLConditioner):
         if sum(patch_counts) != pixels.shape[0]:
             raise ValueError("pixel_values patch count does not match image_grid_thw")
 
-        # Each image has independent vision attention and position tables.
-        # Encoding it separately bounds the vision working set for ten refs.
-        features = []
-        deepstack_by_image = []
-        for image_pixels, grid in zip(pixels.split(patch_counts, dim=0), grid_thw, strict=True):
-            image_features, image_deepstack = self.visual(
-                image_pixels.to(self.visual.patch_embed.proj.weight.dtype),
-                grid.unsqueeze(0),
-            )
-            features.append(image_features)
-            deepstack_by_image.append(image_deepstack)
-        deepstack = [
-            torch.cat([image_features[index] for image_features in deepstack_by_image], dim=0)
-            for index in range(len(self.visual.deepstack_visual_indexes))
-        ]
-        return torch.cat(features, dim=0), deepstack
+        # Keep packed projection shapes: splitting images changes BF16 GEMM
+        # rounding before the complete text decoder amplifies the difference.
+        # Vision attention still executes separately for each image grid.
+        return self.visual(pixels.to(self.visual.patch_embed.proj.weight.dtype), grid_thw)
 
     @torch.no_grad()
     def forward(
@@ -112,29 +100,16 @@ class QwenImage21Qwen3VLConditioner(MiniMaxH3Qwen3VLConditioner):
         elif bool((input_ids == self.config.image_token_id).any()):
             raise ValueError("Image placeholder tokens require pixel_values and image_grid_thw")
 
-        positions = self._get_rope_index(input_ids, image_grid_thw, None, attention_mask)
-        if attention_mask is not None and not bool(attention_mask.to(torch.bool).all()):
-            # Unpadding avoids a dense causal-padding mask and fully masked
-            # queries. Images/DeepStack features retain their prompt order.
-            hidden_states = torch.zeros_like(inputs_embeds)
-            visual_offset = 0
-            for index, valid in enumerate(attention_mask.to(torch.bool)):
-                sample_visual_mask = None if visual_mask is None else visual_mask[index:index + 1, valid]
-                visual_count = 0 if sample_visual_mask is None else int(sample_visual_mask.sum())
-                sample_deepstack = None if deepstack is None else [
-                    features[visual_offset:visual_offset + visual_count] for features in deepstack
-                ]
-                sample = self.language_model(
-                    inputs_embeds[index:index + 1, valid],
-                    positions[:, index:index + 1, valid],
-                    None,
-                    sample_visual_mask,
-                    sample_deepstack,
-                )
-                hidden_states[index, valid] = sample[0]
-                visual_offset += visual_count
-        else:
-            hidden_states = self.language_model(inputs_embeds, positions, None, visual_mask, deepstack)
+        # Text-only prefills retain positions in the padded sequence. A
+        # constant RoPE shift is mathematically equivalent, but changes BF16
+        # rounding; image prefills need each sample's multimodal layout.
+        positions = self._get_rope_index(input_ids, image_grid_thw, None,
+                                         attention_mask if image_grid_thw is not None else None)
+        # Unpadding changes projection and attention shapes in reduced
+        # precision. Preserve the batch through every decoder layer instead.
+        hidden_states = self.language_model(inputs_embeds, positions, attention_mask, visual_mask, deepstack)
+        if attention_mask is not None:
+            hidden_states = hidden_states.masked_fill(~attention_mask.to(torch.bool).unsqueeze(-1), 0)
         return hidden_states[0] if single_sequence else hidden_states
 
     @torch.no_grad()
