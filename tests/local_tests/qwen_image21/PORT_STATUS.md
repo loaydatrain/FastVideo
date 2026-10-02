@@ -4,16 +4,39 @@
 
 | Surface | Implementation | Validation so far |
 | --- | --- | --- |
-| DiT | Native 32-block single-stream transformer, segmented block-causal SDPA, RoPE, CPU/GPU prefix cache and safe host-allocation fallback | CPU contracts; 297 keys match HF metadata |
-| RGBA VAE | Native single-frame encode/decode, posterior mode, latent statistics, slicing and overlap tiling | CPU contracts; 238 keys/shapes match reference metadata |
-| Qwen3-VL | Native shared H3 graph, all 36 text layers, pre-final-norm tap, per-image vision execution | CPU contracts; 749 keys match HF metadata, excluding only `lm_head.weight` |
-| Pipeline | Separate input/text/latent/schedule/denoise/decode stages, strict loading, registry and presets | CPU request-flow and scheduler checks; typed CLI examples parse |
+| DiT | Native 32-block single-stream transformer, segmented block-causal SDPA, RoPE, CPU/GPU prefix cache and safe host-allocation fallback | Released-weight BF16 production-loader parity PASS; all 32 small-grid blocks/final/cache exactly match |
+| RGBA VAE | Native single-frame encode/decode, posterior mode, latent statistics, slicing and overlap tiling | Released-weight FP32 production-loader parity PASS; actual-size BF16 tiled encode/decode exactly match |
+| Qwen3-VL | Native shared H3 graph, all 36 text layers, pre-final-norm tap, packed vision projections and image-isolated attention | Released-weight BF16 production-loader parity PASS; text/long text/1/2/10 images/padded batch exactly match |
+| Pipeline | Separate input/text/latent/schedule/denoise/decode stages, strict loading, registry and presets | Exact upstream parity: 40-step plain I2I/editing and 4-step T2I/two-reference generation; functional I2I/editing visually confirmed |
 | Inputs/outputs | Ordered 0–10 refs, edit/ref shortcuts, RGBA preservation, white vision compositing, four-channel PNG allocation | CPU alpha/layout checks; real PNG export gate written |
-| API/CLI | `GenerationRequest`, legacy `generate_video`, two YAML presets and a Python example | CPU parser checks; production runtime smoke pending |
+| API/CLI | `GenerationRequest`, legacy `generate_video`, two YAML presets and a Python example | Public Python generation PASS; CLI GPU smoke pending |
 
-The CPU suite contains native component tests and pipeline tests with substituted
-components. It does not prove production imports, released-weight parity,
-offload memory use or rendered-image quality. Reference/GPU skips remain pending.
+The current CUDA results, exact model/reference revisions and persistent run
+logs are recorded in [GPU_VALIDATION.md](GPU_VALIDATION.md). Component parity
+does not replace end-to-end pipeline parity, output-quality inspection or
+validation of the original 24 GB memory target.
+
+The parity sweep was paused at the user's request after the T2I / two-reference
+run. The subsequent requested non-layerwise benchmark has completed: a 40-step
+1024 x 1024 plain I2I request took 42.44 s, with a sampled peak of 16.85 GiB
+GPU use and exact pixel equality to the validated image. Text/VAE offload and
+CPU prefix caches remained enabled. The confirmed runs used this editable fork
+on `qwen-img-2.1` with the validation corrections; no further GPU runs
+are scheduled.
+
+The additional warm T2I benchmark used preloaded models, no whole/layerwise
+DiT offload and CUDA prefix KV storage. Two 40-step 1024 x 1024 requests
+averaged 15.38 s for encoder + DiT + decoder and 15.64 s including image save.
+The four-step warmup matched the previously validated upstream baseline
+exactly; forty-step outputs matched each other. Logs and numerical reports are
+preserved separately in Git. Run images/tensors and the upstream source clone
+were local to the original pod and are excluded from this archive.
+
+## Original Mac verification
+
+The initial CPU suite contains native component tests and pipeline tests with
+substituted components. Those results alone did not prove production imports,
+released-weight parity, offload memory use or rendered-image quality.
 
 Final local verification: **62 passed, 22 skipped** in the documented pytest
 command. All 35 changed/new Python files compile; TOML/YAML parsing and
@@ -24,7 +47,7 @@ Changed-file formatting, lint, spelling and Markdown hooks were run through
 pre-commit with the repository's exclusions. The mypy environment could not be
 installed because the Mac ran out of disk space; its check remains pending.
 
-No model weights have been downloaded on this Mac. No GPU was used. The source
+No model weights were downloaded and no GPU was used during that Mac run. The source
 reference is Diffusers commit `578c9b2c6636ab2424a0e56186268b83623656b2`;
 small official source/config/index files were inspected. Temporary source-isolated
 reference experiments also found exact tiny VAE results and matching DiT control
@@ -33,19 +56,26 @@ not the production parity gates.
 
 ## Remaining GPU gates
 
-1. Install the resolved dependency environment; run the CLIP tokenizer regression
-   and the pending pre-commit mypy check.
-2. Strictly load all released components through FastVideo and pass each
-   official-reference component parity test without skips.
-3. Run the 1024 pipeline cases, including true CFG, caching on/off and ten refs.
-4. Verify public Python and CLI PNG output, including transparent generation
-   and RGBA edits. Inspect 40-step output quality and calibrate test tolerances.
-5. Measure peak memory with text/DiT/VAE offload and CPU KV caches on the planned
+1. Run the outstanding 1024 pipeline cases: true CFG, caching disabled and ten refs.
+2. Verify CLI PNG output, dedicated transparent generation, RGBA editing,
+   masks and annotations. No tolerance has been widened in this session.
+3. Measure peak memory with text/DiT/VAE offload and CPU KV caches on the planned
    24 GB GPU with >=96 GB host RAM. Validate interrupted-request cleanup there.
-6. Run 2K T2I separately. Seed approved image/latent regression artifacts after
+4. Run 2K T2I separately and assess forty-step two-reference output quality.
+   Seed approved image/latent regression artifacts after
    review; none exist yet for this new model family.
 
 Commands and environment variables are in [README.md](README.md).
+
+## Validation issues
+
+| ID | Status | Evidence / resolution |
+| --- | --- | --- |
+| I001 | Resolved | Existing environment now installs this fork editable; CUDA 13 PyTorch supports RTX 5090. |
+| I002 | Resolved | Unsupported explicit preset removed from Python/YAML examples and the pipeline parity helper; typed parser checks pass. |
+| I003 | Resolved | Encoder batching and text-only RoPE corrections produce exact upstream BF16 results for all six gate cases. |
+| I004 | Resolved | Full-resolution I2I drift came from VAE singleton input strides; matching upstream preprocessing yields exact 4/40-step plain I2I and 40-step edit pixels/latents. Failed logs retained. |
+| I005 | Resolved | NumPy scalar promotion caused tiny sigma drift; canonical math.exp preserves FP32 and makes 4/40-step schedules exact at both tested token counts. |
 
 ## Explicit first-release limits
 
