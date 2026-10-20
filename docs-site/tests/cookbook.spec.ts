@@ -6,9 +6,25 @@ const route = "/FastVideo/cookbook/minimax-h3/fasth3-8step";
 // deterministic when GitHub/Trendshift are slow or unreachable.
 test.beforeEach(async ({ page }) => {
   await page.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (request) => request.abort());
+  await page.route("**/assets/cookbook-config/capacity/hardware.json", (route) =>
+    route.fulfill({ path: "tests/fixtures/hardware.json", contentType: "application/json" }),
+  );
 });
+async function chooseHardware(page: Page, query: string) {
+  const search = page.getByLabel("Search hardware", { exact: true });
+  if ((await search.count()) === 0)
+    await page
+      .getByRole("button", { name: /Find or add|Choose hardware|Change hardware/ })
+      .first()
+      .click();
+  await search.fill(query);
+  await page
+    .getByRole("radio", { name: new RegExp(query, "i") })
+    .first()
+    .click();
+}
 async function settings(page: Page, section: string) {
-  await expect(page.locator(".recipe-matrix")).toBeVisible();
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   if (section === "Serving" || section === "Hardware") {
     const advanced = page.locator(".matrix-advanced");
     if ((await advanced.getAttribute("open")) === null) await advanced.locator("summary").first().click();
@@ -100,12 +116,34 @@ test("deployment changes reset edits and support MLX and streaming", async ({ pa
   await settings(page, "Serving");
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("8000");
   await page.goto("/FastVideo/cookbook/ltx/ltx2-distilled");
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel("Client command", { exact: true })).toContainText("/health");
   await page.locator(".recipe-request-code > summary").click();
   await expect(page.getByText(/WebSocket URL:/)).toBeVisible();
   await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel("Client command", { exact: true })).toContainText("input_reference");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Wan2.1 I2V 14B");
+});
+
+test("runtime and hardware choices support browser back", async ({ page }) => {
+  await page.goto(route);
+  await expect(page.locator(".recipe-matrix")).toBeVisible({ timeout: 30000 });
+  await backend(page, "MLX");
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fmlx-rest/);
+  await backend(page, "CUDA");
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fcuda-rest/);
+  await page.goBack();
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fmlx-rest/);
+  await expect(page.getByRole("button", { name: "MLX", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.goForward();
+  await expect(page).toHaveURL(/deployment=fasth3-8step%2Fcuda-rest/);
+  await chooseHardware(page, "RTX 5090");
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
+  await page.goBack();
+  await expect(page).not.toHaveURL(/hardware=/);
+  await page.goForward();
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
 });
 
 test("failed loads offer retry without keeping stale commands", async ({ page }) => {
@@ -185,8 +223,8 @@ test("inherited values, explicit false, zero and null retain their meanings", as
 test("catalog discovery opens dedicated model recipes and filters by family and task", async ({ page }) => {
   await page.goto("/FastVideo/cookbook");
   const cards = page.locator(".recipe-card");
-  await expect(cards).toHaveCount(34);
-  await expect(cards.first()).toContainText("FastH3 8-Step V2");
+  await expect(cards).toHaveCount(35);
+  await expect(cards.first()).toContainText("FastH3 OmniRef");
   await page.getByLabel("Model family", { exact: true }).selectOption("Wan");
   await page.getByLabel("Search recipes").fill("Wan2.1 I2V");
   await expect(cards).toHaveCount(1);
@@ -202,8 +240,9 @@ test("catalog discovery opens dedicated model recipes and filters by family and 
 
 test("hardware preferences stay distinct from schema-backed GPU count and topology", async ({ page }) => {
   await page.goto(route);
-  await page.getByRole("radio", { name: "RTX PRO 6000" }).check();
-  await expect(page).toHaveURL(/hardware=rtx/);
+  await chooseHardware(page, "RTX PRO 6000");
+  await expect(page).toHaveURL(/hardware=rtx-pro-6000-blackwell-workstation-96gb/);
+  await expect(page.locator(".hardware-selected")).toContainText("96 GB VRAM");
   await settings(page, "Hardware");
   await page.getByLabel("Tensor parallelism", { exact: true }).fill("2");
   await page.getByRole("button", { name: "Use automatic parallelism" }).click();
@@ -238,7 +277,7 @@ test("output tabs support keyboard navigation and precision chips use the backen
   await page.getByLabel("Search recipes").fill("does not exist");
   await expect(page.getByRole("heading", { name: "No matching recipes" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator(".recipe-card")).toHaveCount(34);
+  await expect(page.locator(".recipe-card")).toHaveCount(35);
 });
 
 test("cookbook cards and controls remain readable in dark mode and reflow at 320px", async ({ page }) => {
@@ -303,9 +342,9 @@ test("FastH3 Trim edits drive inference, serving, and complete copyable launch s
     });
   });
   await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-trim");
-  await page.getByRole("radio", { name: "DGX Spark GB10", exact: true }).check();
-  await expect(page.getByRole("radio", { name: "DGX Spark GB10", exact: true })).toBeChecked();
-  await expect(page.getByRole("radio", { name: "H100 Data center", exact: true })).toHaveCount(0);
+  await chooseHardware(page, "DGX Spark");
+  await expect(page).toHaveURL(/hardware=dgx-spark-gb10-128gb/);
+  await expect(page.getByText(/128 GB unified memory/)).toBeVisible();
   await page.getByLabel("Prompt", { exact: true }).fill("A potter finishes a blue bowl.");
   await page.getByLabel("Seed", { exact: true }).fill("0");
   await page.getByRole("button", { name: "Copy config + command", exact: true }).click();
@@ -387,50 +426,93 @@ test("source-backed serving pages expose their actual server settings", async ({
 test("source model hardware preferences survive hydration and reload", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/FastVideo/cookbook/flux/models/flux2-klein-t2i?hardware=custom%3ARTX%204090");
-  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await page.goto(
+    "/FastVideo/cookbook/flux/models/flux2-klein-t2i?hardware=custom&hwName=RTX+4090&hwType=dedicated&hwMemory=24&hwUnit=GB",
+  );
+  await expect(page.getByText("RTX 4090", { exact: true })).toBeVisible();
+  await expect(page.locator(".hardware-selected")).toContainText("24 GB VRAM");
   await page.reload();
-  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await expect(page.getByText("RTX 4090", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
 test("custom devices persist and no preview control can block generated YAML", async ({ page }) => {
   await page.goto(route);
   await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await page.getByRole("button", { name: "Can't find it? Add a device", exact: true }).click();
   await page.getByLabel("Device name", { exact: true }).fill("RTX 4090");
-  await page.getByRole("button", { name: "Add device", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await page.getByRole("combobox", { name: "Memory type", exact: true }).selectOption("dedicated");
+  await page.getByRole("spinbutton", { name: "Nominal memory", exact: true }).fill("24");
+  await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("32");
+  await expect(page.getByText("The usable budget cannot exceed the nominal memory.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use this device", exact: true })).toBeDisabled();
+  await page.getByRole("spinbutton", { name: "Usable budget (optional)", exact: true }).fill("22");
+  await page.getByRole("spinbutton", { name: "Host RAM (optional)", exact: true }).fill("64");
+  await page.getByRole("button", { name: "Use this device", exact: true }).click();
+  await expect(page.getByText("RTX 4090", { exact: true })).toBeVisible();
+  await expect(page.locator(".hardware-selected")).toContainText("24 GB VRAM");
+  await expect(page.locator(".hardware-selected")).toContainText("Your budget: 22 GB");
+  await expect(page.locator(".hardware-selected")).toContainText("Host RAM: 64 GB");
+  await expect(page).toHaveURL(/hardware=custom/);
+  await expect(page).toHaveURL(/hwName=RTX\+4090/);
   await page.reload();
-  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await expect(page.getByText("RTX 4090", { exact: true })).toBeVisible();
+  await expect(page.locator(".hardware-selected")).toContainText("24 GB VRAM");
   await expect(page.locator(".component-plan")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toHaveCount(0);
+  await expect(page.getByText("RTX 4090", { exact: true })).toHaveCount(0);
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
 });
 
-test("hardware is never preselected and a target does not change generated YAML", async ({ page }) => {
+test("hardware is never preselected; a single-GPU device sets one GPU with valid parallelism", async ({ page }) => {
   await page.goto(route);
   await expect(page.locator(".hardware-picker")).toBeVisible({ timeout: 30000 });
-  await expect(page.locator('input[type="radio"]:checked')).toHaveCount(0);
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
   await output(page, "config.yaml");
   const yaml = page.getByLabel("Generated YAML", { exact: true });
-  const baseline = await yaml.innerText();
-  await page.getByRole("radio", { name: /RTX 5090/ }).check();
-  await expect(page.getByRole("radio", { name: /RTX 5090/ })).toBeChecked();
-  await expect(page.getByText(/RTX 5090 is saved as your target/)).toBeVisible();
-  await expect(yaml).toHaveText(baseline);
+  await expect(yaml).toContainText('"num_gpus": 4');
+  await chooseHardware(page, "RTX 5090");
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
+  await expect(page.getByText(/GeForce RTX 5090 .*32 GB VRAM/)).toBeVisible();
+  await expect(page.getByText(/Set to 1 GPU for .*RTX 5090/)).toBeVisible();
+  await expect(yaml).toContainText('"num_gpus": 1');
+  await expect(yaml).toContainText('"sp_size": -1');
+  await expect(yaml).not.toContainText('"hardware"');
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
-  await expect(page.locator('input[type="radio"]:checked')).toHaveCount(0);
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
 });
 
-test("a saved target missing from the list stays visible and clearable", async ({ page }) => {
-  await page.goto(`${route}?hardware=retired-gpu`);
-  await expect(page.getByText("Saved hardware target is not in this list.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+test("lowering the GPU count resets parallelism that no longer fits", async ({ page }) => {
+  await page.goto(route);
+  await output(page, "config.yaml");
+  const yaml = page.getByLabel("Generated YAML", { exact: true });
+  await page.getByLabel("GPU count", { exact: true }).fill("2");
+  await expect(page.getByText("Parallelism set to automatic for 2 GPUs.")).toBeVisible();
+  await expect(yaml).toContainText('"num_gpus": 2');
+  await expect(yaml).toContainText('"sp_size": -1');
+  await expect(page.getByText("Valid configuration", { exact: true })).toBeVisible();
+});
+
+test("browser back after a hardware-only change keeps the editor loaded", async ({ page }) => {
+  await page.goto(route);
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await chooseHardware(page, "RTX 5090");
+  await expect(page).toHaveURL(/hardware=geforce-rtx-5090-32gb/);
+  await page.goBack();
   await expect(page).not.toHaveURL(/hardware=/);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
+  await expect(page.getByText("Loading deployment settings…")).toHaveCount(0);
+});
+
+test("hardware links resolve catalog aliases and non-CUDA devices are not CUDA targets", async ({ page }) => {
+  await page.goto(`${route}?hardware=5090`);
+  await expect(page.locator(".hardware-selected")).toContainText("RTX 5090");
+  await page.getByRole("button", { name: "Change hardware", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("Arc B580");
+  await expect(page.getByRole("radio", { name: /Arc B580/ })).toHaveCount(0);
 });
 
 test("recipe facts separate validity, fit, and run evidence with inspectable assumptions", async ({ page }) => {
@@ -442,6 +524,97 @@ test("recipe facts separate validity, fit, and run evidence with inspectable ass
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(page.getByText(/This is not a fit claim/)).toBeVisible();
   await expect(page.getByText(/do not establish this configuration/)).toBeVisible();
+});
+
+test("catalog lookup resolves aliases, variants, and unified memory without pooling", async ({ page }) => {
+  await page.goto(route);
+  await chooseHardware(page, "PRO 6000");
+  await expect(page).toHaveURL(/hardware=rtx-pro-6000-blackwell-workstation-96gb/);
+  await expect(page.locator(".hardware-selected")).toContainText("96 GB VRAM");
+  await expect(page.locator(".hardware-address-note")).toContainText("Per device, not a combined pool");
+  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("GB10");
+  await page.getByRole("radio", { name: /DGX Spark/ }).click();
+  await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+  await expect(page.locator(".hardware-selected")).toContainText("CUDA");
+  await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
+  await settings(page, "Hardware");
+  await page.getByLabel("GPU count", { exact: true }).fill("8");
+  await expect(page.getByText(/8 GPUs share unified memory/)).toBeVisible();
+  await expect(page.getByText(/its 128 GB is not multiplied/)).toBeVisible();
+});
+
+test("MLX lookup uses unified memory and a custom Mac stays reusable", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-8step?deployment=fasth3-8step%2Fmlx-rest");
+  await page.getByRole("button", { name: "+ Find or add a Mac", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("M4 Max");
+  await page.getByRole("radio", { name: /Apple M4 Max/ }).click();
+  await expect(page.locator(".hardware-selected")).toContainText("128 GB unified memory");
+  await expect(page.locator(".hardware-selected")).toContainText("Apple MLX");
+  await expect(page.locator(".hardware-selected")).toContainText("Usable budget: 96 GB");
+  await expect(page.locator(".hardware-address-note")).toContainText("not dedicated VRAM");
+  await expect(page.getByRole("button", { name: "Clear hardware target", exact: true })).toBeVisible();
+});
+
+test("the directory filters by runtime without a hardware picker", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await expect(page.locator(".recipe-directory .hardware-picker")).toHaveCount(0);
+  await page.getByLabel("Runtime", { exact: true }).selectOption("mlx");
+  await expect(page).toHaveURL(/runtime=mlx/);
+  const card = page.locator(".recipe-card").filter({ hasText: "FastMetal 1.3B" });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("href", /\/cookbook\/wan\/models\/[^?]+$/);
+  await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
+});
+
+test("task discovery filters the directory and round-trips through the URL", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  await page.getByLabel("Task", { exact: true }).selectOption("Image to video");
+  await expect(page).toHaveURL(/task=Image\+to\+video/);
+  await expect(page.locator(".recipe-card").filter({ hasText: "Wan2.1 I2V 14B" })).toBeVisible();
+  await expect(page.locator(".recipe-card").filter({ hasText: "FastWan2.1 1.3B" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Task", { exact: true })).toHaveValue("Image to video");
+  await page.getByLabel("Task", { exact: true }).selectOption("All tasks");
+  await expect(page).not.toHaveURL(/task=/);
+});
+
+test("directory filters round-trip through the URL", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook?category=Image&runtime=cuda");
+  await expect(page.getByRole("button", { name: "Image", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Runtime", { exact: true })).toHaveValue("cuda");
+  await expect(page.locator(".recipe-card")).toHaveCount(4);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Image", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Runtime", { exact: true })).toHaveValue("cuda");
+  await expect(page.locator(".recipe-card")).toHaveCount(4);
+});
+
+test("a saved target missing from the catalog stays visible and clearable", async ({ page }) => {
+  await page.goto(`${route}?hardware=retired-gpu`);
+  await expect(page.getByText(/Saved hardware target \(retired-gpu\) is not in this catalog/)).toBeVisible();
+  await page.getByRole("button", { name: "Clear hardware target", exact: true }).click();
+  await expect(page).not.toHaveURL(/hardware=/);
+  await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
+});
+
+test("catalog search renders one plain no-results message", async ({ page }) => {
+  await page.goto(route);
+  await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await page.getByLabel("Search hardware", { exact: true }).fill("no-such-device");
+  await expect(page.getByText("No matching devices.", { exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "Can't find it? Add a device", exact: true }).click();
+  await expect(page.getByLabel("Device name", { exact: true })).toBeVisible();
+});
+
+test("hardware lookup closes with Escape and returns focus", async ({ page }) => {
+  await page.goto(route);
+  await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await expect(page.getByLabel("Search hardware", { exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Search hardware", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "+ Find or add a GPU", exact: true })).toBeFocused();
 });
 
 test("WebSocket deployments expose only the serving interface", async ({ page }) => {
