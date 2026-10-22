@@ -21,6 +21,8 @@ generator:
     workload_type: t2i
     experimental:
       kv_cache_device: cuda
+      reference_resolution: 1024
+      use_kv_cache: true
 request:
   prompt: A red ceramic teapot, isolated on a transparent background.
   sampling:
@@ -32,8 +34,6 @@ request:
     guidance_scale: 1.0
     true_cfg_scale: 1.0
     seed: 42
-    reference_resolution: 1024
-    use_kv_cache: true
   output:
     output_path: outputs/qwen_image21/teapot.png
     save_video: true

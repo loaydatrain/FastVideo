@@ -13,6 +13,7 @@ import pytest
 import torch
 from PIL import Image, ImageDraw
 
+from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     DEVICE_MAPPINGS,
@@ -84,6 +85,10 @@ def _run_similarity(model_id: str, attention_backend_name: str, prompt: str,
         min_acceptable_ssim=MIN_ACCEPTABLE_SSIM,
         media_extension=".png",
         init_kwargs_override={
+            "pipeline_config": QwenImage21PipelineConfig(
+                reference_resolution=selected_params["height"],
+                use_kv_cache=True,
+            ),
             "revision": MODEL_REVISION,
             "workload_type": "i2i" if references else "t2i",
             "use_fsdp_inference": False,
@@ -97,10 +102,8 @@ def _run_similarity(model_id: str, attention_backend_name: str, prompt: str,
         },
         generation_kwargs_override={
             "references": references,
-            "reference_resolution": selected_params["height"],
             "negative_prompt": None,
             "true_cfg_scale": 1.0,
-            "use_kv_cache": True,
             "return_frames": True,
             "save_video": True,
         },

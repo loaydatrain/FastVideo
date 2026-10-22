@@ -83,15 +83,16 @@ only the vision encoder's copy is composited over white. Ask for a transparent
 background in the prompt when you want the model to generate transparency.
 
 Defaults are 1024×1024, 40 steps, one image and guidance 1. Output dimensions and
-`reference_resolution` must be positive multiples of 32. References are resized
-to approximately `reference_resolution²` pixels while retaining their aspect
+`QwenImage21PipelineConfig.reference_resolution` must be positive multiples of 32.
+References are resized to approximately `reference_resolution²` pixels while retaining their aspect
 ratio. A 2K output can keep the reference resolution at 1024.
 
 Set `true_cfg_scale > 1` with an explicit `negative_prompt` for two-branch CFG.
 An empty string is an explicit negative prompt. `guidance_scale` stays at 1;
 this checkpoint does not use embedded guidance.
 
-Set `request.sampling.use_kv_cache: false` to recompute prefixes each step.
+Set `QwenImage21PipelineConfig(use_kv_cache=False)` to recompute prefixes each
+step. In YAML, set `generator.pipeline.experimental.use_kv_cache: false`.
 The default CPU cache avoids holding every reference prefix on the GPU; it
 falls back to uncached execution if a host cache allocation fails. Request
 caches are cleared after success or failure. GPU cache placement is available

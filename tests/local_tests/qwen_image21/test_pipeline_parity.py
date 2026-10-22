@@ -175,7 +175,9 @@ def _worker(kind: str, spec_path: str, output_path: str) -> None:
                 engine=EngineConfig(num_gpus=1, parallelism=ParallelismConfig(tp_size=1, sp_size=1),
                                     offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True,
                                                           vae=True, lazy_module_load=True)),
-                pipeline=PipelineSelection(workload_type="i2i" if spec["refs"] else "t2i"),
+                pipeline=PipelineSelection(workload_type="i2i" if spec["refs"] else "t2i",
+                                           experimental={"reference_resolution": reference_resolution,
+                                                         "use_kv_cache": spec["cache"]}),
             ))
         original_execute = generator.executor.execute_forward
         try:
@@ -196,9 +198,7 @@ def _worker(kind: str, spec_path: str, output_path: str) -> None:
                     inputs=InputConfig(references=spec["refs"] or None, latents=noise.clone()),
                     sampling=SamplingConfig(height=height, width=width, num_frames=1,
                                             fps=1, num_inference_steps=spec["steps"], guidance_scale=1,
-                                            true_cfg_scale=spec["true_cfg_scale"], seed=seed,
-                                            reference_resolution=reference_resolution,
-                                            use_kv_cache=spec["cache"], sigmas=sigmas),
+                                            true_cfg_scale=spec["true_cfg_scale"], seed=seed, sigmas=sigmas),
                     output=OutputConfig(output_path=str(Path(output_path).with_suffix(".png")),
                                         return_frames=True, save_video=True),
                 ))

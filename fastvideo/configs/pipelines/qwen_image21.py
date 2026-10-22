@@ -24,5 +24,7 @@ class QwenImage21PipelineConfig(PipelineConfig):
     output_channels: int = 4
     flow_shift: float | None = None
     scheduler_step_in_fp32: bool = True
+    reference_resolution: int = 1024
+    use_kv_cache: bool = True
     # Runtime placement policy. CPU keeps ten reference prefixes out of VRAM.
     kv_cache_device: str = "cpu"

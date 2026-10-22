@@ -37,6 +37,8 @@ def stage_args(monkeypatch):
         pipeline_config=SimpleNamespace(
             dit_config=SimpleNamespace(arch_config=SimpleNamespace(in_channels=2)),
             vae_tiling=False,
+            reference_resolution=32,
+            use_kv_cache=True,
             kv_cache_device="cpu",
         ),
     )
@@ -48,7 +50,6 @@ def _batch(**updates):
         prompt="draw",
         height=64,
         width=64,
-        reference_resolution=32,
         num_frames=1,
         num_inference_steps=2,
         guidance_scale=1.0,
@@ -188,6 +189,10 @@ def test_request_validation_accepts_real_forward_batch(stage_args):
     ]:
         with pytest.raises(ValueError, match=message):
             stages.QwenImage21InputStage().forward(_batch(**updates), stage_args)
+    for resolution in (0, 33):
+        stage_args.pipeline_config.reference_resolution = resolution
+        with pytest.raises(ValueError, match="reference_resolution"):
+            stages.QwenImage21InputStage().forward(_batch(), stage_args)
 
 
 def test_ordered_references_preserve_rgba_for_vae_and_composite_for_encoder(stage_args):
@@ -236,7 +241,8 @@ def test_host_cache_allocation_failure_falls_back_to_uncached_execution(stage_ar
     assert [call.mode for call in transformer.calls] == ["extract", None, None]
     assert all(call.cache is None for call in transformer.calls[1:])
     _assert_caches_cleared(transformer)
-    expected, _, _, _ = _run(_batch(use_kv_cache=False), stage_args)
+    stage_args.pipeline_config.use_kv_cache = False
+    expected, _, _, _ = _run(_batch(), stage_args)
     torch.testing.assert_close(actual.latents, expected.latents, atol=0, rtol=0)
     torch.testing.assert_close(actual.output, expected.output, atol=0, rtol=0)
 

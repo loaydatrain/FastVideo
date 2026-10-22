@@ -155,8 +155,8 @@ def validate_request(batch: Any, args: Any) -> None:
     if not isinstance(batch.prompt, str) and not (isinstance(batch.prompt, list) and len(batch.prompt) == 1
                                                   and isinstance(batch.prompt[0], str)):
         raise ValueError("Qwen-Image-2.1 requires one text prompt per request")
-    for name in ("height", "width", "reference_resolution"):
-        value = getattr(batch, name)
+    for name, value in (("height", batch.height), ("width", batch.width), ("reference_resolution",
+                                                                           args.pipeline_config.reference_resolution)):
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0 or value % 32:
             raise ValueError(f"{name} must be a positive multiple of 32")
     if not isinstance(batch.num_inference_steps, int) or batch.num_inference_steps < 1:
@@ -196,7 +196,9 @@ class QwenImage21InputStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         validate_request(batch, fastvideo_args)
         references = collect_references(batch.references, batch.image_path, batch.pil_image)
-        references = [resize_reference(image, batch.reference_resolution) for image in references]
+        references = [
+            resize_reference(image, fastvideo_args.pipeline_config.reference_resolution) for image in references
+        ]
         shapes = [(1, image.height // 16, image.width // 16) for image in references]
         shapes.append((1, batch.height // 16, batch.width // 16))
         batch.extra[STATE_KEY] = QwenImage21State(references=references, img_shapes=[shapes])
@@ -390,7 +392,7 @@ class QwenImage21DenoisingStage(PipelineStage):
         cache_device = fastvideo_args.pipeline_config.kv_cache_device
         if cache_device not in ("cpu", "cuda"):
             raise ValueError("kv_cache_device must be cpu or cuda; use_kv_cache=False disables caching")
-        cache_enabled = batch.use_kv_cache and self.transformer.config.causal_condition
+        cache_enabled = fastvideo_args.pipeline_config.use_kv_cache and self.transformer.config.causal_condition
         caches = []
         if cache_enabled:
             caches = [QwenImage21KVCache(len(self.transformer.transformer_blocks), storage_device=cache_device)]

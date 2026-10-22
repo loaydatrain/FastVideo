@@ -46,7 +46,13 @@ def main() -> None:
                 offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True, vae=True,
                                       lazy_module_load=True),
             ),
-            pipeline=PipelineSelection(workload_type=workload),
+            pipeline=PipelineSelection(
+                workload_type=workload,
+                experimental={
+                    "reference_resolution": args.reference_resolution,
+                    "use_kv_cache": args.use_kv_cache,
+                },
+            ),
         ))
     try:
         generator.generate(
@@ -56,8 +62,7 @@ def main() -> None:
                 inputs=InputConfig(references=args.reference or None),
                 sampling=SamplingConfig(height=args.height, width=args.width, num_frames=1, fps=1,
                                         num_inference_steps=args.steps, guidance_scale=1.0,
-                                        true_cfg_scale=args.true_cfg_scale, seed=args.seed,
-                                        reference_resolution=args.reference_resolution, use_kv_cache=args.use_kv_cache),
+                                        true_cfg_scale=args.true_cfg_scale, seed=args.seed),
                 output=OutputConfig(output_path=args.output, save_video=True, return_frames=False),
             ))
     finally:

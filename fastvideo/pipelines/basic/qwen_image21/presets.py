@@ -24,8 +24,6 @@ QWEN_IMAGE21 = InferencePreset(
         "guidance_scale": 1.0,
         "true_cfg_scale": 1.0,
         "negative_prompt": None,
-        "reference_resolution": 1024,
-        "use_kv_cache": True,
     },
 )
 
