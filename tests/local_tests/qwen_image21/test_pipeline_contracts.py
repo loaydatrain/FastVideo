@@ -87,7 +87,7 @@ def request(**updates):
     values = dict(prompt="draw", negative_prompt=None, references=None, image_path=None, pil_image=None,
                   height=64, width=64, reference_resolution=32, num_frames=1, num_videos_per_prompt=1,
                   num_inference_steps=2, guidance_scale=1, true_cfg_scale=1, video_path=None,
-                  conditioning_mask=None, prompt_embeds=[], negative_prompt_embeds=None,
+                  prompt_embeds=[], negative_prompt_embeds=None,
                   extra={}, latents=None, image_latent=None, generator=None, seed=42,
                   use_kv_cache=True, sigmas=None)
     values.update(updates)

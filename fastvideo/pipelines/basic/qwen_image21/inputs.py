@@ -154,7 +154,7 @@ def validate_request(batch: Any, args: Any) -> None:
         raise ValueError("true_cfg_scale must be finite and at least 1")
     if batch.guidance_scale != 1:
         raise ValueError("Qwen-Image-2.1 has no embedded guidance; use true_cfg_scale with negative_prompt")
-    if batch.video_path is not None or batch.conditioning_mask is not None:
+    if batch.video_path is not None or getattr(batch, "conditioning_mask", None) is not None:
         raise ValueError("Pass annotations or mask images as references; this pipeline takes single-frame images")
     if batch.prompt_embeds or batch.negative_prompt_embeds:
         raise ValueError("Externally supplied prompt embeddings are not supported by this Qwen-Image-2.1 port")
