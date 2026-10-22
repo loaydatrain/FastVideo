@@ -1,4 +1,11 @@
-# Qwen-Image-2.1
+# Qwen-Image-2.1 recipes
+
+<RecipeFamily family="qwen_image21" />
+
+Choose the text-to-image or references-and-editing recipe on the model page.
+The text-to-image YAML keeps prefix keys and values on CUDA; the Python
+reference/editing example uses the default CPU cache. Both use one GPU with
+CPU offload enabled. Replace `source.png` with your own image for editing.
 
 The native FastVideo implementation includes text-to-image generation, image
 editing, reference-to-image generation with 1–10 ordered images, and RGBA

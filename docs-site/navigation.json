@@ -255,7 +255,7 @@
       },
       {
         "label": "Qwen-Image-2.1",
-        "href": "/inference/qwen_image21"
+        "href": "/cookbook/qwen-image21"
       },
       {
         "label": "Stable Diffusion",
