@@ -590,7 +590,10 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
 
     def _time_shift_exponential(self, mu: float, sigma: float,
                                 t: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
-        return math.exp(mu) / (math.exp(mu) + (1 / t - 1)**sigma)
+        if isinstance(t, np.ndarray):
+            return np.exp(mu) / (np.exp(mu) + (1 / t - 1)**sigma)
+        else:
+            return math.exp(mu) / (math.exp(mu) + (1 / t - 1)**sigma)
 
     def _time_shift_linear(self, mu: float, sigma: float, t: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
         return mu / (mu + (1 / t - 1)**sigma)
