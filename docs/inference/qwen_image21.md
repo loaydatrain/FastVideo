@@ -8,8 +8,8 @@ ordered-reference path. Describe their meaning in the prompt.
 This port is implemented and has CPU component and pipeline contract checks.
 Released-weight CUDA parity, output quality and the 24 GB memory target are
 pending validation. The repository runbook is
-`tests/local_tests/qwen_image21/README.md`, with evidence and remaining gates in
-`tests/local_tests/qwen_image21/PORT_STATUS.md`.
+`tests/local_tests/qwen_image21/README.md`. Detailed run evidence and status
+notes are retained locally rather than included in the source checkout.
 
 ## Run on a GPU
 

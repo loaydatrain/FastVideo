@@ -11,11 +11,12 @@ With preloaded models, no DiT offload and CUDA prefix KV storage, two warm
 40-step T2I requests averaged 15.38 s for encoder + DiT + decoder and 15.64 s
 including PNG saving. Their four-step warmup exactly matched the validated
 upstream baseline; the forty-step outputs matched each other.
-The completed runs are recorded in [GPU_VALIDATION.md](GPU_VALIDATION.md)
-for confirmed runs, commands, numerical metrics and persistent log links, and
-[PORT_STATUS.md](PORT_STATUS.md) for remaining gates.
+Local-only `GPU_VALIDATION.md` and `PORT_STATUS.md` records contain confirmed
+runs, commands, numerical metrics, log paths and remaining gates. These notes
+and generated run artifacts are retained in developer workspaces and are not
+part of the source checkout.
 
-Text evidence is archived separately under `outputs/qwen_image21/`. Images,
+Local text evidence is stored under `outputs/qwen_image21/`. Images,
 tensor dumps, weights and the upstream checkout are not included in this
 pod-deletion archive. Reproduction requires downloading the pinned assets,
 updating historical absolute paths and regenerating baseline tensors.
