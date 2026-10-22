@@ -254,9 +254,9 @@ class QwenImage21TextEncodingStage(PipelineStage):
         # The loader's FSDP2 CPU offload already streams individual text layers.
         move = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
                 and not isinstance(first_param, DTensor))
-        if move:
-            pinned_offload.load(self.text_encoder, device, pin=fastvideo_args.pin_cpu_memory)
         try:
+            if move:
+                pinned_offload.load(self.text_encoder, device, pin=fastvideo_args.pin_cpu_memory)
             prompt = batch.prompt[0] if isinstance(batch.prompt, list) else batch.prompt
             if prompt is None:
                 raise ValueError("A text prompt is required")
@@ -312,8 +312,8 @@ class QwenImage21LatentStage(PipelineStage):
             batch.latents = batch.latents.to(device=device, dtype=dtype)
         batch.raw_latent_shape = shape
         if state.references:
-            pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
             try:
+                pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
                 if fastvideo_args.pipeline_config.vae_tiling:
                     self.vae.enable_tiling()
                 else:
@@ -484,8 +484,8 @@ class QwenImage21DecodingStage(PipelineStage):
             batch.output = batch.latents
             return batch
         device = get_local_torch_device()
-        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
+            pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             else:
