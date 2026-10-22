@@ -23,7 +23,6 @@ QWEN_IMAGE21 = InferencePreset(
         "num_inference_steps": 40,
         "guidance_scale": 1.0,
         "true_cfg_scale": 1.0,
-        "negative_prompt": None,
     },
 )
 
