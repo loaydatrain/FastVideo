@@ -198,7 +198,7 @@ def test_qwen_image21_vae_bf16_reference_layout_parity(height, width, tiled):
     from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import QwenImage21Pipeline
     from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
     from fastvideo.models.loader.component_loader import VAELoader
-    from fastvideo.pipelines.basic.qwen_image21.inputs import normalize_latents, pack_latents, reference_pixels
+    from fastvideo.pipelines.basic.qwen_image21.stages import normalize_latents, pack_latents, reference_pixels
 
     rgb = torch.randint(0, 256, (height, width, 3), generator=torch.Generator().manual_seed(23), dtype=torch.uint8)
     image = Image.fromarray(rgb.numpy()).convert("RGBA")

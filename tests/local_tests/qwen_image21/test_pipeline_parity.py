@@ -56,7 +56,7 @@ def _install_native_diagnostics(worker) -> None:
     """Observe the actual GPU worker; only ``extra`` survives executor transport."""
     import torch
 
-    from fastvideo.pipelines.basic.qwen_image21.inputs import STATE_KEY, reference_pixels
+    from fastvideo.pipelines.basic.qwen_image21.stages import STATE_KEY, reference_pixels
 
     original_forward = worker.execute_forward
     scheduler = worker.pipeline.get_module("scheduler")
