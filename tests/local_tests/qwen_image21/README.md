@@ -21,33 +21,45 @@ tensor dumps, weights and the upstream checkout are not included in this
 pod-deletion archive. Reproduction requires downloading the pinned assets,
 updating historical absolute paths and regenerating baseline tensors.
 
-## CPU checks on the Mac
+## CI regression tests
 
-Run from the repository root, in a Python environment with torch, pytest,
-NumPy, Pillow, SciPy and PyYAML:
+The maintained Qwen CI suite contains 12 cases in four files:
+
+| File | Cases | CI lane |
+|---|---:|---|
+| `fastvideo/tests/transformers/test_qwen_image21_attention.py` | 4 | Transformer |
+| `fastvideo/tests/stages/test_qwen_image21_stages.py` | 5 | Unit, through the existing stages directory |
+| `fastvideo/tests/golden_gate/test_qwen_image21.py` | 1 | Golden gate |
+| `fastvideo/tests/ssim/test_qwen_image21_similarity.py` | 2 | SSIM |
+
+The first nine cases use native package imports, real inference batches and
+small deterministic components. The transformer cases require a CUDA runtime.
+Run these before the checkpoint-backed tests:
 
 ```bash
-python -m pytest \
-  tests/local_tests/qwen_image21 \
-  tests/local_tests/transformers/test_qwen_image21_transformer_contracts.py \
-  tests/local_tests/transformers/test_qwen_image21_transformer_parity.py \
-  tests/local_tests/encoders/test_qwen_image21_conditioner.py \
-  tests/local_tests/encoders/test_qwen_image21_conditioner_parity.py \
-  tests/local_tests/vaes/test_qwen_image21_vae_cpu.py \
-  tests/local_tests/vaes/test_qwen_image21_vae_parity.py -q
+python -m pytest fastvideo/tests/stages/test_qwen_image21_stages.py \
+  fastvideo/tests/transformers/test_qwen_image21_attention.py -xq
 ```
 
-The component tests isolate imports from the CUDA runtime. DiT and encoder
-checks substitute ordinary Torch linear/embedding dispatch; their numerical
-graphs remain native. Pipeline checks substitute small deterministic components.
-The CLI checks run the actual typed parser with startup imports isolated.
-These are useful implementation checks, not production-loader parity.
+The golden loads one real BF16 transformer block and uses the shared device and
+runtime fingerprint machinery. The SSIM file covers T2I and one reference-image
+edit, comparing all RGBA channels through the existing PNG similarity helper.
+Default SSIM requests use 512 x 512 and four steps; `--ssim-full-quality` selects
+1024 x 1024 and 40 steps. Both use FlashAttention and the pinned Qwen checkpoint.
+Select FA4 before Python starts, as below, so the runtime fingerprint matches.
+Provide matching reviewed references before claiming either gate passes:
 
-In the original Mac environment, reference, tokenizer and GPU tests skipped.
-A skip is not a passing parity result. An explicitly enabled GPU gate fails
-when CUDA, dependencies or assets are missing.
+```bash
+FASTVIDEO_FA4=1 python -m pytest \
+  fastvideo/tests/golden_gate/test_qwen_image21.py -xq
+FASTVIDEO_FA4=1 python -m pytest \
+  fastvideo/tests/ssim/test_qwen_image21_similarity.py -xq
+```
 
-The CPU cases are included in `.buildkite/scripts/unit_test.sh`.
+Independent component and full-pipeline upstream parity remain local and
+opt-in. `tests/local_tests/` is excluded from CI. Earlier CPU porting scaffolds
+have been consolidated into the package regressions; they are no longer part
+of the PR. Setup and local parity commands follow below.
 
 ## Prepare an allocated CUDA machine
 
