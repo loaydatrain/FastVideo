@@ -149,6 +149,7 @@ surfaces:
       preprocess_text_funcs: "Internal text preprocessing hooks."
       postprocess_text_funcs: "Internal text postprocessing hooks."
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
+      output_channels: "Decoded pixel channel count fixed by the model; used to allocate the output buffer."
 
   pipeline_config_extensions:
     preset_owned:
