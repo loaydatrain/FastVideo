@@ -208,7 +208,7 @@ class QwenImage21InputStage(PipelineStage):
 
 
 class QwenImage21TextEncodingStage(PipelineStage):
-    performance_component_metric = "text_encoding"
+    performance_component_metric = "text_encoder_time_s"
 
     def __init__(self, text_encoder, processor):
         self.text_encoder = text_encoder
@@ -276,7 +276,7 @@ class QwenImage21TextEncodingStage(PipelineStage):
 
 
 class QwenImage21LatentStage(PipelineStage):
-    performance_component_metric = "vae_encoding"
+    performance_component_metric = "vae_encode_time_s"
 
     def __init__(self, vae):
         self.vae = vae
@@ -372,7 +372,7 @@ class QwenImage21ScheduleStage(PipelineStage):
 
 
 class QwenImage21DenoisingStage(PipelineStage):
-    performance_component_metric = "denoising"
+    performance_component_metric = "dit_time_s"
 
     def __init__(self, transformer, scheduler):
         self.transformer, self.scheduler = transformer, scheduler
@@ -467,7 +467,7 @@ class QwenImage21DenoisingStage(PipelineStage):
 
 
 class QwenImage21DecodingStage(PipelineStage):
-    performance_component_metric = "vae_decoding"
+    performance_component_metric = "vae_decode_time_s"
 
     def __init__(self, vae):
         self.vae = vae
