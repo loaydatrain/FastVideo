@@ -24,14 +24,36 @@ for the test commands and validation scope.
 ## Run on a GPU
 
 Use one CUDA GPU, with `tp_size=sp_size=1`. By default, text layers and DiT
-blocks offload to CPU, the VAE tiles, and prefix keys/values stay on CPU.
-The validated GB200 runs used these settings and peaked at approximately
-13.30 GiB of PyTorch allocated GPU memory. This allocation measurement does
-not establish a minimum VRAM requirement; the minimum is **unknown**, and
-operation on a 24 GB GPU has not been verified. Plan 96–128 GB of host RAM
-as an estimate for offloaded models and reference-heavy requests, rather
-than a measured minimum. Use a PyTorch CUDA build compatible with your GPU.
-CPU transfers can limit throughput.
+blocks offload to CPU and the VAE tiles. The T2I YAML uses CUDA prefix caches;
+the Python reference/editing example uses CPU caches.
+
+The following peaks were measured on one **NVIDIA GB200 per request**, using
+BF16, 1024×1024 output, seed 42 and two full 40-step requests per process.
+Measurements include initialization, deferred model loading, a cold request,
+a warm request, PNG export and shutdown. Image cases use one original Qwen
+reference image. Compilation is disabled. All figures are **GiB**.
+
+| Configuration | KV cache | GPU allocated | GPU reserved | Device VRAM including driver | Host process-tree RSS |
+| --- | --- | ---: | ---: | ---: | ---: |
+| T2I YAML, SDPA, offloaded, tiled | CUDA | 13.28 | 22.54 | 24.19 | 43.87 |
+| Plain I2I Python, SDPA, offloaded, tiled | CPU | 13.29 | 16.11 | 17.76 | 48.29 |
+| Editing Python, SDPA, offloaded, tiled | CPU | 13.29 | 16.11 | 17.76 | 49.25 |
+| T2I, FA4, resident models, untiled VAE | CUDA | 32.77 | 35.50 | 37.09 | 13.12 |
+
+GPU allocated/reserved peaks use PyTorch counters across all stages. Device
+VRAM is sampled with NVML and includes the GB200's 0.72 GiB driver reservation;
+the corresponding peak used-memory readings are 23.47 / 17.03 / 17.03 / 36.36 GiB.
+Host RAM is the sampled simultaneous RSS of the process tree, including model
+loading and output validation. Device and RSS sampling targets 20 ms; brief
+transients can fall between samples. These process measurements do not include
+all operating-system memory or establish a minimum-capacity requirement.
+Minimum hardware VRAM remains **unknown**; operation on an actual 24 GB GPU
+has not been verified. Allow host RAM headroom beyond the observed process RSS.
+
+The resident FA4 row uses a separate performance configuration with offload and
+VAE tiling disabled; those settings increase GPU residency. Its memory run is
+not a controlled latency comparison. Use a PyTorch CUDA build compatible with
+your GPU. CPU transfers can limit throughput.
 
 Provide a complete local Diffusers-format `Qwen/Qwen-Image-2.1` checkpoint, or
 let the Hugging Face loader fetch it on the GPU machine. Model weights are
