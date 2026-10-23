@@ -3,10 +3,9 @@
 """Native Qwen-Image-2.1 single-stream diffusion transformer.
 
 The interleaved text/image block-causal stream has no matching FastVideo
-sequence-parallel attention primitive. This implementation runs segmented
-PyTorch SDPA on one device by default; tensor and sequence parallelism are not
-implemented. Explicit FlashAttention or SageAttention requests replace only
-mask-free dense calls, retaining SDPA for causal text and padding masks.
+sequence-parallel attention primitive. Mask-free dense calls use FastVideo's
+shared attention selector, retaining PyTorch SDPA for causal text and padding
+masks. Tensor and sequence parallelism are not implemented.
 Prefix K/V can reside on the host, so decoding restores only one layer's cache
 at a time instead of keeping every layer's reference images on the GPU.
 """
@@ -243,7 +242,7 @@ def _attention(query, key, value, mask=None):
 
 def _make_dense_attention(heads: int, dim_head: int,
                           supported_attention_backends: tuple[AttentionBackendEnum, ...],
-                          requested_backend: AttentionBackendEnum) -> nn.Module | None:
+                          requested_backend: AttentionBackendEnum | None) -> nn.Module | None:
     # Keep optional attention kernels and GPU dispatch imports off the SDPA path.
     from fastvideo.attention.layer import LocalAttention
     from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
@@ -253,7 +252,6 @@ def _make_dense_attention(heads: int, dim_head: int,
     dtype = get_compute_dtype()
     backend_cls = get_attn_backend(dim_head, dtype,
                                    supported_attention_backends=supported_attention_backends,
-                                   default_backend=AttentionBackendEnum.TORCH_SDPA,
                                    requested=requested_backend)
     backend = backend_name_to_enum(backend_cls.get_name())
     if backend is AttentionBackendEnum.TORCH_SDPA:
@@ -298,7 +296,7 @@ class QwenImage21Attention(nn.Module):
         self.norm_q = QwenImage21RMSNorm(dim_head, eps)
         self.norm_k = QwenImage21RMSNorm(dim_head, eps)
         self.dense_attn = None
-        if requested_backend is not None and requested_backend.name != "TORCH_SDPA":
+        if requested_backend is None or requested_backend.name != "TORCH_SDPA":
             supported = supported_attention_backends or _DEFAULT_CONFIG.arch_config._supported_attention_backends
             self.dense_attn = _make_dense_attention(heads, dim_head, supported, requested_backend)
 

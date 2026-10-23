@@ -196,14 +196,18 @@ def test_masked_calls_use_sdpa_and_dense_calls_use_selected_backend(qwen_setup, 
         return RecordingBackend
 
     monkeypatch.setattr(selector, "get_attn_backend", resolve_backend)
-    baseline = _initialize_linears(qwen.QwenImage21Attention(16, 2, 8, 1e-6).to(device))
-    attention = qwen.QwenImage21Attention(
+    baseline = _initialize_linears(qwen.QwenImage21Attention(
+        16, 2, 8, 1e-6, requested_backend=AttentionBackendEnum.TORCH_SDPA).to(device))
+    assert resolutions == []
+    attention = qwen.QwenImage21Attention(16, 2, 8, 1e-6).to(device).eval()
+    explicit_attention = qwen.QwenImage21Attention(
         16, 2, 8, 1e-6, requested_backend=AttentionBackendEnum.FLASH_ATTN).to(device).eval()
     attention.load_state_dict(baseline.state_dict())
-    assert len(resolutions) == 1
-    assert resolutions[0]["requested"] is AttentionBackendEnum.FLASH_ATTN
-    assert resolutions[0]["default_backend"] is AttentionBackendEnum.TORCH_SDPA
-    assert AttentionBackendEnum.FLASH_ATTN in resolutions[0]["supported_attention_backends"]
+    explicit_attention.load_state_dict(baseline.state_dict())
+    assert [resolution["requested"] for resolution in resolutions] == [None, AttentionBackendEnum.FLASH_ATTN]
+    assert all("default_backend" not in resolution for resolution in resolutions)
+    assert all(AttentionBackendEnum.FLASH_ATTN in resolution["supported_attention_backends"]
+               for resolution in resolutions)
 
     hidden = torch.randn(1, 11, 16, device=device)
     image_ids = torch.tensor([-1, -1] + [0] * 4 + [-1] + [1] * 4, device=device)
@@ -212,6 +216,9 @@ def test_masked_calls_use_sdpa_and_dense_calls_use_selected_backend(qwen_setup, 
     valid[:, 0] = False
     expected = baseline(hidden, segments=segments)
     padded_expected = baseline(hidden, segments=segments, key_valid=valid)
+    assert_close(explicit_attention(hidden, segments=segments), expected, atol=1e-5, rtol=1e-5)
+    assert dense_calls == [(4, 6), (4, 11)]
+    dense_calls.clear()
     sdpa = qwen._attention
 
     def record_masked_sdpa(query, key, value, mask=None):
