@@ -31,7 +31,9 @@ The following peaks were measured on one **NVIDIA GB200 per request**, using
 BF16, 1024×1024 output, seed 42 and two full 40-step requests per process.
 Measurements include initialization, deferred model loading, a cold request,
 a warm request, PNG export and shutdown. Image cases use one original Qwen
-reference image. Compilation is disabled. All figures are **GiB**.
+reference image. Compilation is disabled. The offloaded rows explicitly select
+`FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA` and `FASTVIDEO_FA4=0`; the resident row
+selects FA4 as described below. All figures are **GiB**.
 
 | Configuration | KV cache | GPU allocated | GPU reserved | Device VRAM including driver | Host process-tree RSS |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -135,11 +137,11 @@ export FASTVIDEO_FA4=1
 export FASTVIDEO_NVFP4_FA4=0
 ```
 
-Dense reference-image and generated-image attention use FA4; masked text
-attention uses SDPA. Compare numerical parity with the same backend in both
-implementations: switching kernels can change the generated pixels. SDPA
-remains the default. Select `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA` and
-`FASTVIDEO_FA4=0` to return to SDPA.
+These flags select FA4 for dense reference-image and generated-image
+attention; masked text attention uses SDPA. Compare numerical parity with the
+same backend in both implementations: switching kernels can change generated
+pixels. Automatic backend selection follows FastVideo's shared policy. Select
+`FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA` and `FASTVIDEO_FA4=0` to force SDPA.
 
 ## Scope
 
