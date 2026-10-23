@@ -71,7 +71,6 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
-# Text-to-image DiT models (2D image generation)
 _TEXT_TO_IMAGE_DIT_MODELS = {
     "QwenImage21Transformer2DModel": ("dits", "qwen_image21", "QwenImage21Transformer2DModel"),
 }

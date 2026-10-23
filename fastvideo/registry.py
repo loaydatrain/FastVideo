@@ -1205,7 +1205,6 @@ def _register_configs() -> None:
         ],
     )
 
-    # Qwen-Image-2.1 uses one architecture for generation, references and edits.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=QwenImage21PipelineConfig,
