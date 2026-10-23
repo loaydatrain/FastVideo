@@ -12,23 +12,26 @@ editing, reference-to-image generation with 1–10 ordered images, and RGBA
 generation and editing. Annotations and separate mask images use the same
 ordered-reference path. Describe their meaning in the prompt.
 
-This port is implemented and has CPU component and pipeline contract checks.
-Released-weight CUDA parity, output quality and the 24 GB memory target are
-pending validation. The repository runbook is
-`tests/local_tests/qwen_image21/README.md`. Detailed run evidence and status
-notes are retained locally rather than included in the source checkout.
+Released-weight parity has passed on one NVIDIA GB200 for 1024×1024,
+40-step text-to-image, plain image-to-image and instruction editing. With the
+same SDPA policy in FastVideo and the pinned upstream implementation, all
+40 denoiser predictions, scheduler updates, final latents and RGBA pixels
+matched exactly. Dedicated transparency checks, 2K output and ten-reference
+requests remain unverified. See the
+[validation runbook](https://github.com/hao-ai-lab/FastVideo/blob/main/tests/local_tests/qwen_image21/README.md)
+for the test commands and validation scope.
 
 ## Run on a GPU
 
-Use one CUDA GPU, with `tp_size=sp_size=1`. The initial hardware target is a
-24 GB GPU and at least 96 GB host RAM. Text layers and DiT blocks offload to
-CPU, the VAE tiles, and prefix keys/values stay on CPU by default. These settings
-reduce GPU residency; the memory limit has not yet been measured.
-
-A desktop RTX 5090 has [32 GB of VRAM](https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/)
-and is a reasonable validation target with these settings. Plan 96–128 GB host
-RAM for the reference-heavy cases. Use a PyTorch CUDA build with Blackwell
-support. CPU transfers can limit throughput; no 5090 timing has been measured.
+Use one CUDA GPU, with `tp_size=sp_size=1`. By default, text layers and DiT
+blocks offload to CPU, the VAE tiles, and prefix keys/values stay on CPU.
+The validated GB200 runs used these settings and peaked at approximately
+13.30 GiB of PyTorch allocated GPU memory. This allocation measurement does
+not establish a minimum VRAM requirement; the minimum is **unknown**, and
+operation on a 24 GB GPU has not been verified. Plan 96–128 GB of host RAM
+as an estimate for offloaded models and reference-heavy requests, rather
+than a measured minimum. Use a PyTorch CUDA build compatible with your GPU.
+CPU transfers can limit throughput.
 
 Provide a complete local Diffusers-format `Qwen/Qwen-Image-2.1` checkpoint, or
 let the Hugging Face loader fetch it on the GPU machine. Model weights are
@@ -99,13 +102,30 @@ caches are cleared after success or failure. GPU cache placement is available
 through `QwenImage21PipelineConfig(kv_cache_device="cuda")` in a pipeline config
 file, for hardware with enough VRAM.
 
+## Optional FlashAttention 4
+
+With the repository's pinned FA4 dependencies installed on supported hardware,
+select the backend before starting Python:
+
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
+export FASTVIDEO_FA4=1
+export FASTVIDEO_NVFP4_FA4=0
+```
+
+Dense reference-image and generated-image attention use FA4; masked text
+attention uses SDPA. Compare numerical parity with the same backend in both
+implementations: switching kernels can change the generated pixels. SDPA
+remains the default. Select `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA` and
+`FASTVIDEO_FA4=0` to return to SDPA.
+
 ## Scope
 
 The first port is single GPU, batch one, single frame and unquantized. SP/TP,
 custom attention processors, LoRA, prompt rewriting and HTTP serving are not
 included. The prompt rewriter's separate 9B checkpoints can be integrated later.
-The first GPU gates cover all modes at 1024, followed by 2K text-to-image;
-2K with ten references is outside the initial memory gate.
+The confirmed full-pipeline modes are the three listed above. Transparency,
+2K output and ten-reference requests require additional validation.
 
 The numerical source is [Diffusers at revision
 578c9b2](https://github.com/huggingface/diffusers/tree/578c9b2c6636ab2424a0e56186268b83623656b2).

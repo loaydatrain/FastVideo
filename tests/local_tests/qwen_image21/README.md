@@ -68,10 +68,15 @@ The initial target is one 24 GB CUDA GPU and at least 96 GB host RAM. Use
 tiling, deferred module loading and CPU prefix caches. The 24 GB bound is a
 target until measured by the GPU tests.
 
-Install FastVideo following the repository's CUDA installation guide. The
-dependency update requires Transformers 5.17+, tokenizers 0.23.1–0.23.x and
-Accelerate 1.1+. Run the CLIP tokenizer regression after installing the resolved
-environment; it requires no network or checkpoint download.
+Install FastVideo following the repository's CUDA installation guide and
+existing `pyproject.toml` constraints: Transformers 5.15+, tokenizers below
+0.23 and Accelerate 1.0.1. Main-compatible versions have passed 1024-square,
+40-step native T2I, plain I2I and editing comparisons against fresh pinned
+upstream outputs. A separate Transformers 5.18 / tokenizers 0.23.2 /
+Accelerate 1.15 environment also passed; that validation environment explicitly
+overrides the tokenizers/Accelerate constraints and does not change the package
+requirements. Run the offline CLIP tokenizer regression after changing the
+resolved environment.
 
 Prepare the reference checkout and a complete local checkpoint on that machine:
 
