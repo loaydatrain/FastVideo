@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qwen-Image-2.1 attention and prefix-cache regressions with tiny native weights.
 
-Requires one CUDA GPU and the ordinary FastVideo runtime; no model download or
-optional FlashAttention installation is needed. Independent checkpoint parity
-remains in ``tests/local_tests/transformers/``.
+RoPE checks run on CPU; attention/cache cases require one CUDA GPU and the
+ordinary FastVideo runtime. No model download or optional FlashAttention
+installation is needed. Independent checkpoint parity remains in
+``tests/local_tests/transformers/``.
 """
 
 from __future__ import annotations
@@ -22,11 +23,10 @@ from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, Qw
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.platforms import AttentionBackendEnum
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires one CUDA GPU")
-
-
 @pytest.fixture
 def qwen_setup(env_overrides, monkeypatch, request):
+    if not torch.cuda.is_available():
+        pytest.skip("Requires one CUDA GPU")
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
     monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
@@ -63,6 +63,67 @@ def _inputs(device):
         encoder_hidden_states_mask=torch.tensor(
             [[True, True, True, True, False], [False, True, True, True, False]], device=device),
     )
+
+
+@pytest.mark.parametrize("position", [8191, 8192, 9215, 9216])
+def test_rope_positive_position_does_not_alias_negative_coordinates(position):
+    rope = qwen.QwenImage21Rope(theta=10000, axes_dim=(2, 2, 2))
+    mask = torch.tensor([True] + [False] * position)
+    actual = rope([(1, 1, 1)], mask, torch.device("cpu"))
+
+    # Each two-dimensional axis has frequency 1: its phase is exp(i * position).
+    expected = torch.exp(1j * torch.tensor([position] * 3, dtype=torch.float32))
+    assert_close(actual[-1], expected, atol=1e-6, rtol=1e-6)
+    image_expected = torch.exp(1j * torch.tensor([0, -1, -1], dtype=torch.float32))
+    assert_close(actual[0], image_expected, atol=1e-6, rtol=1e-6)
+    assert actual.shape == (position + 1, 3)
+    assert actual.dtype == torch.complex64 and actual.device.type == "cpu"
+
+
+@pytest.mark.parametrize("device_name", ["cpu", "cuda"])
+def test_rope_long_layout_preserves_multi_image_coordinates_and_short_requests(device_name):
+    if device_name == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA RoPE placement requires one GPU")
+    device = torch.device(device_name)
+    rope = qwen.QwenImage21Rope(theta=10000, axes_dim=(2, 2, 2)).to(device=device, dtype=torch.bfloat16)
+    shapes = [(1, 2049, 1), (1, 1, 2049)]
+
+    def layout(text_tokens):
+        mask = torch.tensor([False] * text_tokens + [True] * 2049 + [False] * 3 + [True] * 2049 + [False] * 2,
+                            device=device)
+        # Odd image axes span -1025..1023, beyond the old negative table.
+        # Each image advances subsequent text by its largest spatial axis.
+        positions = ([[p] * 3 for p in range(text_tokens)]
+                     + [[text_tokens, h, -1] for h in range(-1025, 1024)]
+                     + [[text_tokens + p] * 3 for p in (2049, 2050, 2051)]
+                     + [[text_tokens + 2052, -1, w] for w in range(-1025, 1024)]
+                     + [[text_tokens + p] * 3 for p in (4101, 4102)])
+        expected = torch.exp(1j * torch.tensor(positions, dtype=torch.float32, device=device))
+        return mask, expected
+
+    short_mask, short_expected = layout(3)
+    before = rope(shapes, short_mask, device).clone()
+    assert_close(before, short_expected, atol=1e-6, rtol=1e-6)
+    long_mask, long_expected = layout(9216)
+    actual = rope(shapes, long_mask, device)
+    assert_close(actual, long_expected, atol=1e-6, rtol=1e-6)
+    assert actual.device == long_mask.device and actual.dtype == torch.complex64
+    assert_close(rope(shapes, short_mask, device), before, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("device_name", ["cpu", "cuda"])
+def test_rope_long_layout_keeps_nontrivial_short_frequencies_bitwise(device_name):
+    if device_name == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA RoPE placement requires one GPU")
+    device = torch.device(device_name)
+    rope = qwen.QwenImage21Rope(theta=10000, axes_dim=(2, 2, 4)).to(device=device, dtype=torch.bfloat16)
+    shapes = [(1, 2, 2)]
+    short_mask = torch.tensor([False] * 3 + [True] * 4, device=device)
+    before = rope(shapes, short_mask, device).clone()
+    rope(shapes, torch.tensor([False] * 9216 + [True] * 4, device=device), device)
+    after = rope(shapes, short_mask, device)
+    assert after.dtype == torch.complex64 and after.device == short_mask.device
+    assert_close(after, before, atol=0, rtol=0)
 
 
 def test_segmented_attention_matches_independent_dense_mask(qwen_setup):

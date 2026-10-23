@@ -392,14 +392,6 @@ class QwenImage21Rope(nn.Module):
         super().__init__()
         self.theta = theta
         self.axes_dim = axes_dim
-        # Frequency tensors stay fp32/complex64 even when model weights are cast.
-        self.freqs = self._make_freqs(torch.device("cpu"))
-
-    def _make_freqs(self, device):
-        positive = torch.arange(8192, device=device)
-        negative = torch.arange(1024, device=device).flip(0) * -1 - 1
-        return [torch.cat([self.rope_params(positive, dim), self.rope_params(negative, dim)])
-                for dim in self.axes_dim]
 
     def rope_params(self, index: torch.Tensor, dim: int) -> torch.Tensor:
         powers = torch.arange(0, dim, 2, dtype=torch.float32, device=index.device).div(dim)
@@ -407,7 +399,6 @@ class QwenImage21Rope(nn.Module):
         return torch.polar(torch.ones_like(freqs), freqs)
 
     def forward(self, img_shapes, image_pad_mask, device):
-        self.freqs = [freq.to(device=device) for freq in self.freqs]
         frame_index, image_height_index, image_width_index = [], [], []
         cursor, position = 0, 0
         is_image = image_pad_mask.tolist()
@@ -423,11 +414,14 @@ class QwenImage21Rope(nn.Module):
             image_width_index.extend([w for _ in range(height) for w in range(-(width - width // 2), width // 2)])
         if cursor < len(is_image):
             frame_index.extend(range(position, position + len(is_image) - cursor))
-        frame_index = torch.tensor(frame_index, dtype=torch.long, device=device)
+        # Derive frequencies from signed coordinates, retaining Qwen's CPU fp32/complex64 numerics.
+        frame_index = torch.tensor(frame_index, dtype=torch.long, device="cpu")
+        image_pad_mask = torch.tensor(is_image, dtype=torch.bool, device="cpu")
         height_index, width_index = frame_index.clone(), frame_index.clone()
-        height_index[image_pad_mask] = torch.tensor(image_height_index, dtype=torch.long, device=device)
-        width_index[image_pad_mask] = torch.tensor(image_width_index, dtype=torch.long, device=device)
-        return torch.cat([self.freqs[0][frame_index], self.freqs[1][height_index], self.freqs[2][width_index]], dim=-1)
+        height_index[image_pad_mask] = torch.tensor(image_height_index, dtype=torch.long, device="cpu")
+        width_index[image_pad_mask] = torch.tensor(image_width_index, dtype=torch.long, device="cpu")
+        return torch.cat([self.rope_params(index, dim) for index, dim in
+                          zip((frame_index, height_index, width_index), self.axes_dim, strict=True)], dim=-1).to(device)
 
 
 _DEFAULT_CONFIG = QwenImage21Config()
