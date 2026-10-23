@@ -183,7 +183,8 @@ def _worker(kind: str, spec_path: str, output_path: str) -> None:
                                     offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True,
                                                           vae=True, lazy_module_load=True)),
                 pipeline=PipelineSelection(workload_type="i2i" if spec["refs"] else "t2i",
-                                           experimental={"reference_resolution": reference_resolution,
+                                           experimental={"attention_backend": "TORCH_SDPA",
+                                                         "reference_resolution": reference_resolution,
                                                          "use_kv_cache": spec["cache"]}),
             ))
         original_execute = generator.executor.execute_forward

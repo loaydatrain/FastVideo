@@ -101,12 +101,15 @@ def tiny_pair():
     reference = _reference_module()
     from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, QwenImage21Config
     from fastvideo.models.dits.qwen_image21 import QwenImage21Transformer2DModel
+    from fastvideo.platforms import AttentionBackendEnum
 
     kwargs = dict(in_channels=4, out_channels=4, num_layers=2, attention_head_dim=8,
                   num_attention_heads=2, context_in_dim=12, mlp_ratio=3, axes_dims_rope=(2, 2, 4))
     torch.manual_seed(20)
     official = reference.QwenImage21Transformer2DModel(**kwargs).eval()
-    native = QwenImage21Transformer2DModel(QwenImage21Config(arch_config=QwenImage21ArchConfig(**kwargs)), {}).eval()
+    config = QwenImage21Config(arch_config=QwenImage21ArchConfig(**kwargs))
+    config._resolved_attention_backend = AttentionBackendEnum.TORCH_SDPA
+    native = QwenImage21Transformer2DModel(config, {}).eval()
     official_state = official.state_dict()
     assert {key: value.shape for key, value in native.state_dict().items()} == {
         key: value.shape for key, value in official_state.items()
@@ -175,15 +178,15 @@ def test_qwen_image21_dit_production_loader_parity():
 
     from fastvideo.configs.pipelines.qwen_image21 import QwenImage21PipelineConfig
     from fastvideo.models.dits.qwen_image21 import QwenImage21KVCache
-    from fastvideo.models.loader.component_loader import TransformerLoader
+    from fastvideo.models.loader.component_loader import PipelineComponentLoader
 
     args = SimpleNamespace(pipeline_config=QwenImage21PipelineConfig(), model_paths={},
                            override_transformer_cls_name=None, hsdp_replicate_dim=1, hsdp_shard_dim=1,
                            dit_cpu_offload=False, pin_cpu_memory=False, use_fsdp_inference=False,
                            training_mode=False, enable_torch_compile=False, torch_compile_kwargs={},
                            inference_torch_compile=False, VSA_tile_size=None, inference_mode=True,
-                           dit_layerwise_offload=False)
-    native = TransformerLoader().load(str(component), args)
+                           dit_layerwise_offload=False, attention_backend="TORCH_SDPA")
+    native = PipelineComponentLoader.load_module("transformer", str(component), "diffusers", args)
     inputs = _inputs(channels=native.config.in_channels, text_dim=native.config.context_in_dim,
                      device="cuda:0", dtype=torch.bfloat16, batch=1)
     cached_inputs = dict(inputs)
