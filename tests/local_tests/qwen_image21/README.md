@@ -114,7 +114,7 @@ Run all eleven 1024-pixel modes and the separate 2K T2I case at 40 steps:
 
 ```bash
 QWEN_IMAGE21_RUN_PIPELINE_PARITY=1 QWEN_IMAGE21_RUN_2K_PARITY=1 \
-  QWEN_IMAGE21_PARITY_STEPS=40 QWEN_IMAGE21_PARITY_DIAGNOSTICS=1 \
+  QWEN_IMAGE21_PARITY_STEPS=40 \
   python -m pytest tests/local_tests/qwen_image21/test_pipeline_parity.py -xq \
   --basetemp outputs/qwen_image21/parity-40step
 ```
@@ -132,8 +132,7 @@ paths; relative paths resolve beside that JSON file. For parallel invocations,
 assign distinct `CUDA_VISIBLE_DEVICES`, `MASTER_PORT` and artifact paths.
 
 The tests assert RGBA output parity within the existing BF16 tolerance and
-verify PNG alpha export. Diagnostics additionally retain conditioning,
-scheduler, prediction and latent tensors in the pytest artifacts, with
-`diagnostic_metrics.json` recording exactness. Use those records when checking
-the stronger exact-trajectory results reported above; a passing pixel assertion
-alone does not establish bitwise equality at every stage.
+verify PNG alpha export. They also write final-output error metrics. The stronger
+exact-trajectory results reported above came from separate diagnostic runs;
+a passing pixel assertion alone does not establish bitwise equality at every
+stage.
