@@ -49,6 +49,10 @@ def _runtime_metadata() -> dict:
         "cudnn_fp32_precision": getattr(torch.backends.cudnn, "fp32_precision", None),
         "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        "cudnn_sdp_enabled": torch.backends.cuda.cudnn_sdp_enabled(),
+        "flash_sdp_enabled": torch.backends.cuda.flash_sdp_enabled(),
+        "mem_efficient_sdp_enabled": torch.backends.cuda.mem_efficient_sdp_enabled(),
+        "math_sdp_enabled": torch.backends.cuda.math_sdp_enabled(),
     }
 
 
@@ -151,6 +155,9 @@ def _install_reference_diagnostics(pipe, captured: dict):
 
 
 def _worker(kind: str, spec_path: str, output_path: str) -> None:
+    # Native CUDA startup disables cuDNN SDPA. Match that policy in the isolated
+    # reference process; its default can change encoder numerics on GB200.
+    torch.backends.cuda.enable_cudnn_sdp(False)
     spec = json.loads(Path(spec_path).read_text())
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(Path(spec["reference"]) / "src"))
