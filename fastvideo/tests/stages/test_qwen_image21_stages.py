@@ -255,3 +255,50 @@ def test_model_error_propagates_and_clears_request_cache(stage_args):
     assert raised.value is error
     assert [call.mode for call in transformer.calls] == ["extract"]
     _assert_caches_cleared(transformer)
+
+
+@pytest.mark.parametrize("offload", ["whole", "layerwise"])
+def test_cancellation_stops_remaining_steps_and_releases_cache_and_weights(stage_args, monkeypatch, offload):
+    batch = _batch(num_inference_steps=3, latents=torch.zeros(1, 16, 2))
+    scheduler = TinyScheduler()
+    for stage in (
+        stages.QwenImage21InputStage(),
+        stages.QwenImage21TextEncodingStage(TinyEncoder(), TinyProcessor()),
+        stages.QwenImage21LatentStage(TinyVAE()),
+        stages.QwenImage21ScheduleStage(scheduler),
+    ):
+        batch = stage.forward(batch, stage_args)
+
+    class InterruptingTransformer(TinyTransformer):
+
+        def forward(self, **kwargs):
+            result = super().forward(**kwargs)
+            denoising.interrupt = True
+            return result
+
+    transformer = InterruptingTransformer()
+    denoising = stages.QwenImage21DenoisingStage(transformer, scheduler)
+    stage_args.dit_cpu_offload = offload == "whole"
+    stage_args.dit_layerwise_offload = offload == "layerwise"
+    loaded, unloaded, layerwise_released, steps = [], [], [], []
+    monkeypatch.setattr(stages.pinned_offload, "load", lambda model, device, pin=False: loaded.append(model))
+    monkeypatch.setattr(stages.pinned_offload, "unload", lambda model: unloaded.append(model))
+    monkeypatch.setattr(denoising, "_release_layerwise", lambda: layerwise_released.append(True))
+    original_step = scheduler.step
+
+    def record_step(*args, **kwargs):
+        steps.append(args[1])
+        return original_step(*args, **kwargs)
+
+    monkeypatch.setattr(scheduler, "step", record_step)
+    result = denoising.forward(batch, stage_args)
+
+    assert result is batch
+    assert denoising.interrupt is True  # The executor owns the cancellation latch.
+    assert [call.mode for call in transformer.calls] == ["extract"]
+    assert len(steps) == 1
+    assert batch.step_index == 0
+    torch.testing.assert_close(batch.latents, torch.full_like(batch.latents, -0.4))
+    _assert_caches_cleared(transformer)
+    assert loaded == unloaded == ([transformer] if offload == "whole" else [])
+    assert layerwise_released == ([True] if offload == "layerwise" else [])

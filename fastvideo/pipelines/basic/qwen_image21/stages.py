@@ -406,6 +406,8 @@ class QwenImage21DenoisingStage(PipelineStage):
             if move:
                 pinned_offload.load(self.transformer, device, pin=fastvideo_args.pin_cpu_memory)
             for index, timestep in enumerate(tqdm(batch.timesteps, desc="Denoising", total=len(batch.timesteps))):
+                if getattr(self, "interrupt", False):
+                    break
                 latent_input = batch.latents
                 if batch.image_latent is not None:
                     latent_input = torch.cat((batch.image_latent, latent_input), dim=1)
