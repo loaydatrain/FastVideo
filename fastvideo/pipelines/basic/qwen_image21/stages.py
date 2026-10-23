@@ -121,12 +121,14 @@ def extract_prompt(hidden: torch.Tensor, input_ids: torch.Tensor, attention_mask
 
 
 def pack_latents(latents: torch.Tensor) -> torch.Tensor:
+    """Pack [B, C, 1, H, W] into [B, H*W, C], with width varying fastest."""
     if latents.ndim != 5 or latents.shape[2] != 1:
         raise ValueError("Qwen-Image-2.1 latents must have shape [B, C, 1, H, W]")
     return latents.flatten(2).transpose(1, 2)
 
 
 def unpack_latents(latents: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    """Restore [B, C, 1, H/16, W/16] from tokens containing all C channels."""
     if latents.ndim != 3 or latents.shape[1] != (height // 16) * (width // 16):
         raise ValueError("Packed latent length does not match the requested image dimensions")
     return latents.transpose(1, 2).reshape(latents.shape[0], latents.shape[2], 1, height // 16, width // 16)
@@ -212,7 +214,7 @@ class QwenImage21InputStage(PipelineStage):
 class QwenImage21TextEncodingStage(PipelineStage):
     performance_component_metric = "text_encoder_time_s"
 
-    def __init__(self, text_encoder, processor):
+    def __init__(self, text_encoder, processor) -> None:
         self.text_encoder = text_encoder
         self.processor = processor
 
@@ -280,7 +282,7 @@ class QwenImage21TextEncodingStage(PipelineStage):
 class QwenImage21LatentStage(PipelineStage):
     performance_component_metric = "vae_encode_time_s"
 
-    def __init__(self, vae):
+    def __init__(self, vae) -> None:
         self.vae = vae
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -347,7 +349,7 @@ class QwenImage21LatentStage(PipelineStage):
 
 class QwenImage21ScheduleStage(PipelineStage):
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler) -> None:
         self.scheduler = scheduler
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -376,7 +378,7 @@ class QwenImage21ScheduleStage(PipelineStage):
 class QwenImage21DenoisingStage(PipelineStage):
     performance_component_metric = "dit_time_s"
 
-    def __init__(self, transformer, scheduler):
+    def __init__(self, transformer, scheduler) -> None:
         self.transformer, self.scheduler = transformer, scheduler
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -471,7 +473,7 @@ class QwenImage21DenoisingStage(PipelineStage):
 class QwenImage21DecodingStage(PipelineStage):
     performance_component_metric = "vae_decode_time_s"
 
-    def __init__(self, vae):
+    def __init__(self, vae) -> None:
         self.vae = vae
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:

@@ -28,15 +28,17 @@ class QwenImage21ArchConfig(DiTArchConfig):
     cast_prompt_embeds_to_dit_dtype: bool = True
 
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_transformer_block])
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
-        AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.SAGE_ATTN)
+    _supported_attention_backends: tuple[AttentionBackendEnum,
+                                         ...] = (AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN,
+                                                 AttentionBackendEnum.SAGE_ATTN)
     param_names_mapping: dict = field(default_factory=lambda: {r"^(.*)$": r"\1"})
     reverse_param_names_mapping: dict = field(default_factory=lambda: {r"^(.*)$": r"\1"})
 
     def __post_init__(self) -> None:
-        self.axes_dims_rope = tuple(self.axes_dims_rope)
-        if len(self.axes_dims_rope) != 3 or any(dim <= 0 or dim % 2 for dim in self.axes_dims_rope):
+        axes_dims_rope = tuple(self.axes_dims_rope)
+        if len(axes_dims_rope) != 3 or any(dim <= 0 or dim % 2 for dim in axes_dims_rope):
             raise ValueError("axes_dims_rope must contain three positive even dimensions")
+        self.axes_dims_rope = (axes_dims_rope[0], axes_dims_rope[1], axes_dims_rope[2])
         if sum(self.axes_dims_rope) != self.attention_head_dim:
             raise ValueError("axes_dims_rope must sum to attention_head_dim")
         if self.num_layers <= 0 or self.num_attention_heads <= 0:
