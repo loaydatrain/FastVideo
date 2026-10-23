@@ -8,6 +8,8 @@ remains in ``tests/local_tests/transformers/``.
 
 from __future__ import annotations
 
+from functools import cache
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -204,7 +206,8 @@ def test_masked_calls_use_sdpa_and_dense_calls_use_selected_backend(qwen_setup, 
         16, 2, 8, 1e-6, requested_backend=AttentionBackendEnum.FLASH_ATTN).to(device).eval()
     attention.load_state_dict(baseline.state_dict())
     explicit_attention.load_state_dict(baseline.state_dict())
-    assert [resolution["requested"] for resolution in resolutions] == [None, AttentionBackendEnum.FLASH_ATTN]
+    assert [resolution.get("requested", selector.NO_REQUEST) for resolution in resolutions] == [
+        selector.NO_REQUEST, AttentionBackendEnum.FLASH_ATTN]
     assert all("default_backend" not in resolution for resolution in resolutions)
     assert all(AttentionBackendEnum.FLASH_ATTN in resolution["supported_attention_backends"]
                for resolution in resolutions)
@@ -253,3 +256,94 @@ def test_masked_calls_use_sdpa_and_dense_calls_use_selected_backend(qwen_setup, 
     assert dense_calls == []
     assert masked_calls == [(4, 11)]
     cache.clear()
+
+
+@pytest.fixture
+def selector_resolution(qwen_setup, monkeypatch):
+    import fastvideo.attention.selector as selector
+    import fastvideo.platforms as platforms
+    from fastvideo.attention.backends.sdpa import SDPABackend
+
+    class AlternativeImpl:
+
+        def __init__(self, **kwargs):
+            pass
+
+    class AlternativeBackend:
+
+        @staticmethod
+        def get_name():
+            return "FLASH_ATTN"
+
+        @staticmethod
+        def get_impl_cls():
+            return AlternativeImpl
+
+    def platform_backend(requested, head_size, dtype):
+        # A dense alternative is available automatically, so losing an SDPA
+        # override cannot silently pass by falling back to SDPA anyway.
+        return "TORCH_SDPA" if requested is AttentionBackendEnum.TORCH_SDPA else "FLASH_ATTN"
+
+    monkeypatch.setattr(platforms.current_platform, "get_attn_backend_cls", platform_backend)
+    monkeypatch.setattr(selector, "resolve_obj_by_qualname",
+                        lambda name: SDPABackend if name == "TORCH_SDPA" else AlternativeBackend)
+    # Exercise the real selector and its cache without leaving fake platform
+    # resolutions in the shared process cache or clearing unrelated entries.
+    monkeypatch.setattr(selector, "_cached_get_attn_backend", cache(selector._cached_get_attn_backend.__wrapped__))
+
+
+def _direct_attention(kind, recorded_backend=None):
+    if kind == "block":
+        return qwen.QwenImage21TransformerBlock(16, 2, 8, 2, 1e-6).attn
+    config = QwenImage21Config(arch_config=QwenImage21ArchConfig(
+        in_channels=4, out_channels=4, num_layers=1, num_attention_heads=2,
+        attention_head_dim=8, context_in_dim=12, axes_dims_rope=(2, 2, 4), mlp_ratio=2))
+    config._resolved_attention_backend = recorded_backend
+    return qwen.QwenImage21Transformer2DModel(config).transformer_blocks[0].attn
+
+
+def _selected_backend(attention):
+    return (AttentionBackendEnum.TORCH_SDPA if attention.dense_attn is None else attention.dense_attn.backend)
+
+
+@pytest.mark.parametrize("kind", ["transformer", "block"])
+@pytest.mark.parametrize("environment", ["TORCH_SDPA", "FLASH_ATTN", None])
+def test_direct_construction_honors_environment_backend(selector_resolution, kind, environment):
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(environment):
+        attention = _direct_attention(kind)
+    expected = AttentionBackendEnum.TORCH_SDPA if environment == "TORCH_SDPA" else AttentionBackendEnum.FLASH_ATTN
+    assert _selected_backend(attention) is expected
+
+
+@pytest.mark.parametrize("recorded", [AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN])
+def test_direct_transformer_recorded_backend_overrides_environment(selector_resolution, recorded):
+    from fastvideo.attention.selector import _component_attention_backend_scope
+
+    environment = "FLASH_ATTN" if recorded is AttentionBackendEnum.TORCH_SDPA else "TORCH_SDPA"
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(environment):
+        with _component_attention_backend_scope(environment, component="qwen"):
+            attention = _direct_attention("transformer", recorded)
+    assert _selected_backend(attention) is recorded
+
+
+@pytest.mark.parametrize("requested", [AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN])
+def test_direct_block_explicit_backend_overrides_environment(selector_resolution, requested):
+    environment = "FLASH_ATTN" if requested is AttentionBackendEnum.TORCH_SDPA else "TORCH_SDPA"
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(environment):
+        block = qwen.QwenImage21TransformerBlock(16, 2, 8, 2, 1e-6, requested_backend=requested)
+    assert _selected_backend(block.attn) is requested
+
+
+@pytest.mark.parametrize("kind", ["transformer", "block"])
+@pytest.mark.parametrize("scoped,consult_env,environment,expected", [
+    (AttentionBackendEnum.TORCH_SDPA, False, "FLASH_ATTN", AttentionBackendEnum.TORCH_SDPA),
+    (None, False, "TORCH_SDPA", AttentionBackendEnum.FLASH_ATTN),
+    (None, True, "TORCH_SDPA", AttentionBackendEnum.TORCH_SDPA),
+])
+def test_direct_construction_honors_component_scope(selector_resolution, kind, scoped, consult_env, environment, expected):
+    from fastvideo.attention.selector import _component_attention_backend_scope
+
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(environment):
+        with _component_attention_backend_scope(scoped, component="qwen", consult_env=consult_env):
+            attention = _direct_attention(kind)
+    assert _selected_backend(attention) is expected

@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.configs.models.dits.qwen_image21 import QwenImage21Config
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
@@ -250,9 +251,10 @@ def _make_dense_attention(heads: int, dim_head: int,
     from fastvideo.utils import get_compute_dtype
 
     dtype = get_compute_dtype()
+    selection_kwargs = {} if requested_backend is None else {"requested": requested_backend}
     backend_cls = get_attn_backend(dim_head, dtype,
                                    supported_attention_backends=supported_attention_backends,
-                                   requested=requested_backend)
+                                   **selection_kwargs)
     backend = backend_name_to_enum(backend_cls.get_name())
     if backend is AttentionBackendEnum.TORCH_SDPA:
         return None
@@ -260,10 +262,10 @@ def _make_dense_attention(heads: int, dim_head: int,
     class DenseLocalAttention(LocalAttention):
         """Qwen owns segment lengths and has already applied its complex RoPE.
 
-        LocalAttention's constructor has not yet threaded explicit component
-        requests to the selector. Resolve through the public selector above,
-        bypassing ambient construction scopes. Its ordinary forward also reads
-        unrelated global metadata, which must not reach our unequal Q/KV calls.
+        Resolve explicit component requests through the public selector above;
+        direct construction without a request retains scope/env selection.
+        LocalAttention's ordinary forward reads unrelated global metadata,
+        which must not reach our unequal Q/KV calls.
         """
 
         def __init__(self):
@@ -451,7 +453,7 @@ class QwenImage21Transformer2DModel(BaseDiT):
         self.txt_in = QwenImage21TextProjection(config.context_in_dim, self.inner_dim, config.eps)
         self.img_in = ReplicatedLinear(config.in_channels * config.patch_size**2, self.inner_dim, bias=False)
         self.modulation = nn.Sequential(nn.SiLU(), ReplicatedLinear(self.inner_dim, 4 * self.inner_dim, bias=False))
-        requested_backend = getattr(config, "_resolved_attention_backend", None)
+        requested_backend = effective_attention_backend(config)
         self.transformer_blocks = nn.ModuleList([
             QwenImage21TransformerBlock(self.inner_dim, config.num_attention_heads, config.attention_head_dim,
                                         config.mlp_ratio, config.eps, requested_backend=requested_backend,
